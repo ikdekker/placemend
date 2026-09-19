@@ -1,7 +1,8 @@
 import React, { useEffect } from 'react';
 import { Header } from './components/Header';
 import { FloorCanvas } from './components/FloorCanvas';
-import { FurnitureInspector } from './components/FurnitureInspector';
+import { PhysicalFurnitureView } from './components/PhysicalFurnitureView';
+import { DrawerInteriorView } from './components/DrawerInteriorView';
 import { ItemModal } from './components/ItemModal';
 import { SearchModal } from './components/SearchModal';
 import { FurnitureLibrary } from './components/FurnitureLibrary';
@@ -10,8 +11,11 @@ import { RoomShapeModal } from './components/RoomShapeModal';
 import { BackupModal } from './components/BackupModal';
 import { MobileNav } from './components/MobileNav';
 import { seedDemoDataIfEmpty } from './db/sampleData';
+import { useAppStore } from './store/useAppStore';
 
 export function App() {
+  const { selectedFurnitureId, selectedContainerId } = useAppStore();
+
   useEffect(() => {
     // Seed rich starter apartment & workshop demo data if database is brand new
     seedDemoDataIfEmpty();
@@ -22,10 +26,15 @@ export function App() {
       {/* Top Navbar: Space, Quick Search, Tools */}
       <Header />
 
-      {/* Main Workspace Area: 2D Floor Plan Canvas + Sliding Furniture Inspector */}
+      {/* Main Workspace Area: True Visual Zoom Navigation */}
       <main className="flex-1 flex w-full h-full overflow-hidden relative">
-        <FloorCanvas />
-        <FurnitureInspector />
+        {selectedFurnitureId === null ? (
+          <FloorCanvas />
+        ) : selectedContainerId === null ? (
+          <PhysicalFurnitureView />
+        ) : (
+          <DrawerInteriorView />
+        )}
       </main>
 
       {/* Mobile Bottom Quick Dock */}

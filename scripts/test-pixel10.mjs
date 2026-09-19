@@ -88,7 +88,7 @@ async function main() {
   await send("Page.enable");
   await send("Runtime.enable");
 
-  // Reset database to ensure new seed with nested compartments loads
+  // Reset database to ensure clean seed
   await send("Runtime.evaluate", {
     expression: `
       new Promise((resolve) => {
@@ -124,10 +124,10 @@ async function main() {
     console.log("Saved screenshot:", fullPath);
   }
 
-  // 1. Initial Floor Plan View
+  // 1. Initial Room Floor Plan View
   await snap("01_floor_plan_pixel10.png");
 
-  // 2. Click KALLAX bookshelf
+  // 2. Click KALLAX Bookshelf -> Level 2: Physical Furniture Elevation
   console.log("Tapping KALLAX bookshelf...");
   await send("Runtime.evaluate", {
     expression: `
@@ -140,25 +140,25 @@ async function main() {
   await wait(700);
   await snap("02_kallax_physical_layout.png");
 
-  // 3. Click "Bottom Left DRÖNA Box" (has 2 compartments)
+  // 3. Click "Bottom Left DRÖNA Box" -> Level 3: Inside Drawer/Box (Organizer Compartments)
   console.log("Tapping 'Bottom Left DRÖNA Box'...");
   await send("Runtime.evaluate", {
     expression: `
       (() => {
-        const slot = Array.from(document.querySelectorAll('h4')).find(el => el.textContent.includes('DRÖNA Box (Board Games)'));
-        if (slot) slot.closest('div[class*="cursor-pointer"]').click();
+        const title = Array.from(document.querySelectorAll('h3')).find(el => el.textContent.includes('DRÖNA Box (Board Games)'));
+        if (title) title.closest('div[class*="cursor-pointer"]').click();
       })()
     `
   });
   await wait(700);
   await snap("03_box_compartments_zoom.png");
 
-  // 4. Click "Big Box Strategy Games" compartment (deepest level)
+  // 4. Click "Big Box Strategy Games" compartment -> Level 4: Clean Visual Item Tiles
   console.log("Tapping 'Big Box Strategy Games' compartment...");
   await send("Runtime.evaluate", {
     expression: `
       (() => {
-        const comp = Array.from(document.querySelectorAll('span')).find(el => el.textContent.includes('Big Box Strategy Games'));
+        const comp = Array.from(document.querySelectorAll('h3')).find(el => el.textContent.includes('Big Box Strategy Games'));
         if (comp) comp.closest('div[class*="cursor-pointer"]').click();
       })()
     `
@@ -166,32 +166,33 @@ async function main() {
   await wait(700);
   await snap("04_deepest_level_clean_items.png");
 
-  // 5. Click back to box, back to kallax, and click "Show all items in cupboard"
-  console.log("Testing 'Show all items in cupboard'...");
+  // 5. Test Back Navigation to Physical View, then toggle All Items
+  console.log("Testing Back navigation...");
   await send("Runtime.evaluate", {
     expression: `
       (() => {
-        // Click back twice
-        const backBtn = document.querySelector('button[title="Back up one level"]');
+        // Back to DRÖNA Box
+        const backBtn = document.querySelector('button[data-action="drawer-back"]');
         if (backBtn) backBtn.click();
       })()
     `
   });
-  await wait(400);
+  await wait(500);
   await send("Runtime.evaluate", {
     expression: `
       (() => {
-        const backBtn = document.querySelector('button[title="Back up one level"]');
+        // Back to KALLAX
+        const backBtn = document.querySelector('button[data-action="drawer-back"]');
         if (backBtn) backBtn.click();
       })()
     `
   });
-  await wait(400);
+  await wait(500);
   await send("Runtime.evaluate", {
     expression: `
       (() => {
-        const showAllBtn = Array.from(document.querySelectorAll('button')).find(el => el.textContent.includes('Show all items'));
-        if (showAllBtn) showAllBtn.click();
+        const allItemsBtn = document.querySelector('button[data-action="toggle-all-items"]');
+        if (allItemsBtn) allItemsBtn.click();
       })()
     `
   });

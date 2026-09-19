@@ -574,9 +574,9 @@ export const FloorCanvas: React.FC = () => {
                   setSelectedFurnitureId(furn.id);
                 }}
                 onMouseDown={(e) => {
-                  e.stopPropagation();
-                  setSelectedFurnitureId(furn.id);
                   if (appMode === 'edit') {
+                    e.stopPropagation();
+                    setSelectedFurnitureId(furn.id);
                     setDraggingFurnitureId(furn.id);
                     setDragStartPos({
                       mouseX: e.clientX,
@@ -587,9 +587,9 @@ export const FloorCanvas: React.FC = () => {
                   }
                 }}
                 onTouchStart={(e) => {
-                  e.stopPropagation();
-                  setSelectedFurnitureId(furn.id);
                   if (appMode === 'edit' && e.touches[0]) {
+                    e.stopPropagation();
+                    setSelectedFurnitureId(furn.id);
                     setDraggingFurnitureId(furn.id);
                     setDragStartPos({
                       mouseX: e.touches[0].clientX,
