@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
 import { RoomShapeType, Point2D, WallSide, DoorSwing, RoomDoor } from '../types';
-import { rotateRoom90Clockwise } from '../utils/roomGeometry';
+import { rotateRoom90Clockwise, mirrorRoom } from '../utils/roomGeometry';
 import { 
   X, 
   Check, 
@@ -17,7 +17,9 @@ import {
   Layers,
   Sparkles,
   ArrowRight,
-  Maximize2
+  Maximize2,
+  FlipHorizontal,
+  FlipVertical
 } from 'lucide-react';
 
 interface ShapePreset {
@@ -297,6 +299,15 @@ export const RoomShapeModal: React.FC = () => {
     }
   };
 
+  // Mirror Room (Horizontal / Vertical)
+  const handleMirrorRoom = async (axis: 'horizontal' | 'vertical') => {
+    await mirrorRoom(room.id, axis);
+    const updated = await db.rooms.get(room.id);
+    if (updated?.polygonPoints) {
+      setCustomPoints(updated.polygonPoints);
+    }
+  };
+
   // Custom Shape Point Management
   const handleAddCustomPoint = () => {
     if (customPoints.length === 0) return;
@@ -388,7 +399,7 @@ export const RoomShapeModal: React.FC = () => {
             }`}
           >
             <Pentagon className="w-3.5 h-3.5" />
-            <span>Presets & Rotate</span>
+            <span>Presets & Transforms</span>
           </button>
           <button
             onClick={() => setActiveTab('custom')}
@@ -413,30 +424,45 @@ export const RoomShapeModal: React.FC = () => {
         {/* Tab Content */}
         <div className="p-4 overflow-y-auto space-y-4 flex-1 custom-scrollbar">
           
-          {/* TAB 1: PRESETS & ROTATE */}
+          {/* TAB 1: PRESETS & TRANSFORMS */}
           {activeTab === 'presets' && (
             <div className="space-y-4">
-              {/* Quick 90° Rotation Banner */}
-              <div className="p-3.5 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center flex-shrink-0 shadow-xs">
-                    <RotateCw className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-black text-blue-950 uppercase tracking-wide">
-                      Rotate Room 90°
-                    </h4>
-                    <p className="text-[11px] text-blue-700">
-                      Rotates room walls, door, and interior furniture clockwise
-                    </p>
-                  </div>
+              {/* Room Transforms: Rotate & Mirror */}
+              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 flex flex-col gap-2.5">
+                <div>
+                  <h4 className="text-xs font-black text-blue-950 uppercase tracking-wide">
+                    Room Transforms (Rotate & Mirror)
+                  </h4>
+                  <p className="text-[11px] text-blue-700">
+                    Transform room layout, walls, door, and all interior furniture
+                  </p>
                 </div>
-                <button
-                  onClick={handleRotateRoom90}
-                  className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs shadow-xs transition-all active:scale-95 cursor-pointer flex-shrink-0"
-                >
-                  Rotate 90°
-                </button>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    onClick={handleRotateRoom90}
+                    className="flex items-center justify-center gap-1 py-2 px-1.5 rounded-xl bg-white hover:bg-blue-50 text-blue-700 font-bold text-xs shadow-xs border border-blue-200 transition-all active:scale-95 cursor-pointer"
+                    title="Rotate clockwise 90°"
+                  >
+                    <RotateCw className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Rotate 90°</span>
+                  </button>
+                  <button
+                    onClick={() => handleMirrorRoom('horizontal')}
+                    className="flex items-center justify-center gap-1 py-2 px-1.5 rounded-xl bg-white hover:bg-blue-50 text-blue-700 font-bold text-xs shadow-xs border border-blue-200 transition-all active:scale-95 cursor-pointer"
+                    title="Mirror horizontally (Flip Left ↔ Right)"
+                  >
+                    <FlipHorizontal className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Flip Horiz ↔</span>
+                  </button>
+                  <button
+                    onClick={() => handleMirrorRoom('vertical')}
+                    className="flex items-center justify-center gap-1 py-2 px-1.5 rounded-xl bg-white hover:bg-blue-50 text-blue-700 font-bold text-xs shadow-xs border border-blue-200 transition-all active:scale-95 cursor-pointer"
+                    title="Mirror vertically (Flip Top ↕ Bottom)"
+                  >
+                    <FlipVertical className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Flip Vert ↕</span>
+                  </button>
+                </div>
               </div>
 
               {/* Preset Shapes List */}
@@ -657,43 +683,258 @@ export const RoomShapeModal: React.FC = () => {
             <div className="space-y-4">
               <div>
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                  Entrance Door Placement
+                  Entrance Door & Opening
                 </span>
                 <p className="text-[11px] text-slate-400">
-                  Specify which wall the door is on, its offset position, and swing direction
+                  Place entrance door on any wall, choose opening width, and set swing direction
                 </p>
               </div>
 
-              {/* Wall Selector */}
+              {/* Interactive Live Architectural Blueprint of Door on Room */}
+              <div className="p-3 bg-slate-900 rounded-2xl border border-slate-800 flex flex-col items-center shadow-inner">
+                <div className="w-full flex items-center justify-between text-[11px] font-bold text-slate-400 mb-2 px-1">
+                  <span className="flex items-center gap-1.5 text-slate-300">
+                    <DoorOpen className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Live Blueprint Preview</span>
+                  </span>
+                  <span className="text-amber-400 font-mono text-[10px]">
+                    Distance: {doorOffset}m • Door Width: {doorWidth}m
+                  </span>
+                </div>
+
+                <svg viewBox="0 0 280 130" className="w-full max-w-[280px] h-[130px] select-none">
+                  {/* Background grid */}
+                  <defs>
+                    <pattern id="modal-subtle-grid" width="14" height="14" patternUnits="userSpaceOnUse">
+                      <path d="M 14 0 L 0 0 0 14" fill="none" stroke="#334155" strokeWidth="0.5" opacity="0.4" />
+                    </pattern>
+                  </defs>
+                  <rect width="100%" height="100%" fill="url(#modal-subtle-grid)" rx="8" />
+
+                  {/* Room base floor */}
+                  <rect x="40" y="25" width="200" height="80" fill="#1e293b" rx="6" />
+
+                  {/* Wall Lines with Labels */}
+                  {/* Top Wall */}
+                  <line 
+                    x1="40" y1="25" x2="240" y2="25" 
+                    stroke={doorWall === 'top' ? '#3b82f6' : '#475569'} 
+                    strokeWidth={doorWall === 'top' ? '5' : '3'} 
+                  />
+                  <text x="140" y="18" fill={doorWall === 'top' ? '#60a5fa' : '#64748b'} fontSize="9" fontWeight="bold" textAnchor="middle">
+                    TOP WALL ({room.gridWidth}m)
+                  </text>
+
+                  {/* Bottom Wall */}
+                  <line 
+                    x1="40" y1="105" x2="240" y2="105" 
+                    stroke={doorWall === 'bottom' ? '#3b82f6' : '#475569'} 
+                    strokeWidth={doorWall === 'bottom' ? '5' : '3'} 
+                  />
+                  <text x="140" y="122" fill={doorWall === 'bottom' ? '#60a5fa' : '#64748b'} fontSize="9" fontWeight="bold" textAnchor="middle">
+                    BOTTOM WALL ({room.gridWidth}m)
+                  </text>
+
+                  {/* Left Wall */}
+                  <line 
+                    x1="40" y1="25" x2="40" y2="105" 
+                    stroke={doorWall === 'left' ? '#3b82f6' : '#475569'} 
+                    strokeWidth={doorWall === 'left' ? '5' : '3'} 
+                  />
+                  <text x="18" y="68" fill={doorWall === 'left' ? '#60a5fa' : '#64748b'} fontSize="9" fontWeight="bold" textAnchor="middle" transform="rotate(-90, 18, 68)">
+                    LEFT ({room.gridHeight}m)
+                  </text>
+
+                  {/* Right Wall */}
+                  <line 
+                    x1="240" y1="25" x2="240" y2="105" 
+                    stroke={doorWall === 'right' ? '#3b82f6' : '#475569'} 
+                    strokeWidth={doorWall === 'right' ? '5' : '3'} 
+                  />
+                  <text x="262" y="68" fill={doorWall === 'right' ? '#60a5fa' : '#64748b'} fontSize="9" fontWeight="bold" textAnchor="middle" transform="rotate(90, 262, 68)">
+                    RIGHT ({room.gridHeight}m)
+                  </text>
+
+                  {/* Door on active wall */}
+                  {(() => {
+                    const wallLen = doorWall === 'top' || doorWall === 'bottom' ? room.gridWidth : room.gridHeight;
+                    const fracOffset = wallLen > 0 ? doorOffset / wallLen : 0;
+                    const fracWidth = wallLen > 0 ? doorWidth / wallLen : 0.15;
+                    
+                    if (doorWall === 'bottom') {
+                      const dx1 = 40 + fracOffset * 200;
+                      const dx2 = Math.min(240, dx1 + fracWidth * 200);
+                      const dw = dx2 - dx1;
+                      const isLeftHinge = doorSwing.includes('left');
+                      const isInward = doorSwing.includes('inward');
+                      const hx = isLeftHinge ? dx1 : dx2;
+                      const hy = 105;
+                      const ly = isInward ? hy - dw : hy + dw;
+                      return (
+                        <g>
+                          <line x1={dx1} y1="105" x2={dx2} y2="105" stroke="#f59e0b" strokeWidth="6" />
+                          <line x1={hx} y1={hy} x2={hx} y2={ly} stroke="#fbbf24" strokeWidth="2.5" />
+                          <circle cx={hx} cy={hy} r="3" fill="#f59e0b" />
+                        </g>
+                      );
+                    } else if (doorWall === 'top') {
+                      const dx1 = 40 + fracOffset * 200;
+                      const dx2 = Math.min(240, dx1 + fracWidth * 200);
+                      const dw = dx2 - dx1;
+                      const isLeftHinge = doorSwing.includes('left');
+                      const isInward = doorSwing.includes('inward');
+                      const hx = isLeftHinge ? dx1 : dx2;
+                      const hy = 25;
+                      const ly = isInward ? hy + dw : hy - dw;
+                      return (
+                        <g>
+                          <line x1={dx1} y1="25" x2={dx2} y2="25" stroke="#f59e0b" strokeWidth="6" />
+                          <line x1={hx} y1={hy} x2={hx} y2={ly} stroke="#fbbf24" strokeWidth="2.5" />
+                          <circle cx={hx} cy={hy} r="3" fill="#f59e0b" />
+                        </g>
+                      );
+                    } else if (doorWall === 'left') {
+                      const dy1 = 25 + fracOffset * 80;
+                      const dy2 = Math.min(105, dy1 + fracWidth * 80);
+                      const dw = dy2 - dy1;
+                      const isLeftHinge = doorSwing.includes('left');
+                      const isInward = doorSwing.includes('inward');
+                      const hy = isLeftHinge ? dy1 : dy2;
+                      const hx = 40;
+                      const lx = isInward ? hx + dw : hx - dw;
+                      return (
+                        <g>
+                          <line x1="40" y1={dy1} x2="40" y2={dy2} stroke="#f59e0b" strokeWidth="6" />
+                          <line x1={hx} y1={hy} x2={lx} y2={hy} stroke="#fbbf24" strokeWidth="2.5" />
+                          <circle cx={hx} cy={hy} r="3" fill="#f59e0b" />
+                        </g>
+                      );
+                    } else {
+                      // right
+                      const dy1 = 25 + fracOffset * 80;
+                      const dy2 = Math.min(105, dy1 + fracWidth * 80);
+                      const dw = dy2 - dy1;
+                      const isLeftHinge = doorSwing.includes('left');
+                      const isInward = doorSwing.includes('inward');
+                      const hy = isLeftHinge ? dy1 : dy2;
+                      const hx = 240;
+                      const lx = isInward ? hx - dw : hx + dw;
+                      return (
+                        <g>
+                          <line x1="240" y1={dy1} x2="240" y2={dy2} stroke="#f59e0b" strokeWidth="6" />
+                          <line x1={hx} y1={hy} x2={lx} y2={hy} stroke="#fbbf24" strokeWidth="2.5" />
+                          <circle cx={hx} cy={hy} r="3" fill="#f59e0b" />
+                        </g>
+                      );
+                    }
+                  })()}
+                </svg>
+              </div>
+
+              {/* 1. Door Width / Opening Size */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Select Wall
-                </label>
-                <div className="grid grid-cols-4 gap-2">
-                  {(['top', 'bottom', 'left', 'right'] as WallSide[]).map((wall) => (
+                <div className="flex items-center justify-between text-xs font-bold mb-1.5">
+                  <span className="text-slate-700">1. Door Opening Width</span>
+                  <span className="font-mono text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">
+                    {doorWidth}m width
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { w: 1, title: 'Single Door', sub: '1m / 3.3ft' },
+                    { w: 2, title: 'Wide Entry', sub: '2m / 6.6ft' },
+                    { w: 3, title: 'Double Doors', sub: '3m / 10ft' },
+                  ].map((item) => (
                     <button
-                      key={wall}
-                      onClick={() => setDoorWall(wall)}
-                      className={`py-2 px-3 rounded-xl text-xs font-black capitalize transition-all cursor-pointer ${
-                        doorWall === wall
+                      key={item.w}
+                      onClick={() => {
+                        setDoorWidth(item.w);
+                        const wallLen = doorWall === 'top' || doorWall === 'bottom' ? room.gridWidth : room.gridHeight;
+                        if (doorOffset + item.w > wallLen) {
+                          setDoorOffset(Math.max(0, wallLen - item.w));
+                        }
+                      }}
+                      className={`py-2 px-2 rounded-xl text-center cursor-pointer transition-all ${
+                        doorWidth === item.w
                           ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
                           : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                       }`}
                     >
-                      {wall}
+                      <div className="text-xs font-bold leading-tight">{item.title}</div>
+                      <div className={`text-[10px] ${doorWidth === item.w ? 'text-blue-100' : 'text-slate-400'}`}>
+                        {item.sub}
+                      </div>
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Offset along wall slider */}
+              {/* 2. Wall Selection */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  2. Select Wall
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { id: 'top' as WallSide, label: '⬆ Top Wall', len: room.gridWidth },
+                    { id: 'bottom' as WallSide, label: '⬇ Bottom Wall', len: room.gridWidth },
+                    { id: 'left' as WallSide, label: '⬅ Left Wall', len: room.gridHeight },
+                    { id: 'right' as WallSide, label: '➡ Right Wall', len: room.gridHeight },
+                  ].map((w) => (
+                    <button
+                      key={w.id}
+                      onClick={() => {
+                        setDoorWall(w.id);
+                        if (doorOffset + doorWidth > w.len) {
+                          setDoorOffset(Math.max(0, w.len - doorWidth));
+                        }
+                      }}
+                      className={`py-2 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        doorWall === w.id
+                          ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                      }`}
+                    >
+                      <div>{w.label}</div>
+                      <div className={`text-[10px] font-normal ${doorWall === w.id ? 'text-blue-100' : 'text-slate-400'}`}>
+                        {w.len}m long
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 3. Position Along Wall */}
               <div>
                 <div className="flex items-center justify-between text-xs font-bold mb-1.5">
-                  <span className="text-slate-700">Position Along Wall</span>
+                  <span className="text-slate-700">3. Distance from Wall Corner</span>
                   <span className="font-mono text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">
                     {doorOffset}m from corner
                   </span>
                 </div>
+
+                {/* Quick Presets */}
+                <div className="flex gap-1.5 mb-2">
+                  <button
+                    onClick={() => setDoorOffset(Math.min(1, maxDoorOffset))}
+                    className="flex-1 py-1 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-bold text-slate-600 cursor-pointer"
+                  >
+                    Start (1m)
+                  </button>
+                  <button
+                    onClick={() => setDoorOffset(Math.round(maxDoorOffset / 2))}
+                    className="flex-1 py-1 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-bold text-slate-600 cursor-pointer"
+                  >
+                    Centered ({Math.round(maxDoorOffset / 2)}m)
+                  </button>
+                  <button
+                    onClick={() => setDoorOffset(Math.max(0, maxDoorOffset - 1))}
+                    className="flex-1 py-1 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-bold text-slate-600 cursor-pointer"
+                  >
+                    End ({Math.max(0, maxDoorOffset - 1)}m)
+                  </button>
+                </div>
+
                 <input
                   type="range"
                   min={0}
@@ -703,22 +944,25 @@ export const RoomShapeModal: React.FC = () => {
                   className="w-full accent-blue-600 cursor-pointer"
                 />
                 <div className="flex justify-between text-[10px] font-bold text-slate-400 font-mono mt-1">
-                  <span>0m</span>
+                  <span>0m (corner)</span>
+                  <span className="text-slate-500 font-medium">
+                    Spans {doorOffset}m to {doorOffset + doorWidth}m
+                  </span>
                   <span>{maxDoorOffset}m</span>
                 </div>
               </div>
 
-              {/* Door Swing Direction */}
+              {/* 4. Door Swing Direction */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Door Swing Arc
+                  4. Door Swing Direction
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   {[
-                    { id: 'inward_left', label: 'Inward Left' },
-                    { id: 'inward_right', label: 'Inward Right' },
-                    { id: 'outward_left', label: 'Outward Left' },
-                    { id: 'outward_right', label: 'Outward Right' },
+                    { id: 'inward_left', label: 'Inward (Left Hinge)' },
+                    { id: 'inward_right', label: 'Inward (Right Hinge)' },
+                    { id: 'outward_left', label: 'Outward (Left Hinge)' },
+                    { id: 'outward_right', label: 'Outward (Right Hinge)' },
                   ].map((s) => (
                     <button
                       key={s.id}
@@ -735,45 +979,13 @@ export const RoomShapeModal: React.FC = () => {
                 </div>
               </div>
 
-              {/* Door Width */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Door Opening Width
-                </label>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setDoorWidth(1)}
-                    className={`flex-1 py-2 rounded-xl text-xs font-bold cursor-pointer transition-all ${
-                      doorWidth === 1 ? 'bg-blue-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700'
-                    }`}
-                  >
-                    Narrow (1m)
-                  </button>
-                  <button
-                    onClick={() => setDoorWidth(2)}
-                    className={`flex-1 py-2 rounded-xl text-xs font-bold cursor-pointer transition-all ${
-                      doorWidth === 2 ? 'bg-blue-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700'
-                    }`}
-                  >
-                    Standard (2m)
-                  </button>
-                  <button
-                    onClick={() => setDoorWidth(3)}
-                    className={`flex-1 py-2 rounded-xl text-xs font-bold cursor-pointer transition-all ${
-                      doorWidth === 3 ? 'bg-blue-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700'
-                    }`}
-                  >
-                    Double Door (3m)
-                  </button>
-                </div>
-              </div>
-
               <div className="flex justify-end pt-2">
                 <button
                   onClick={handleSaveDoor}
-                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md transition-all active:scale-95 cursor-pointer"
+                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
                 >
-                  Save Door Position
+                  <Check className="w-4 h-4" />
+                  <span>Save Door Placement</span>
                 </button>
               </div>
             </div>
@@ -782,14 +994,33 @@ export const RoomShapeModal: React.FC = () => {
         </div>
 
         {/* Footer */}
-        <div className="p-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
-          <button
-            onClick={handleRotateRoom90}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-200/70 hover:bg-slate-300 text-slate-700 text-xs font-bold transition-all cursor-pointer active:scale-95"
-          >
-            <RotateCw className="w-3.5 h-3.5" />
-            <span>Rotate Room 90°</span>
-          </button>
+        <div className="p-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={handleRotateRoom90}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-200/70 hover:bg-slate-300 text-slate-700 text-xs font-bold transition-all cursor-pointer active:scale-95"
+              title="Rotate 90°"
+            >
+              <RotateCw className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Rotate 90°</span>
+            </button>
+            <button
+              onClick={() => handleMirrorRoom('horizontal')}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-200/70 hover:bg-slate-300 text-slate-700 text-xs font-bold transition-all cursor-pointer active:scale-95"
+              title="Mirror Horizontally (Flip Left ↔ Right)"
+            >
+              <FlipHorizontal className="w-3.5 h-3.5" />
+              <span>Flip ↔</span>
+            </button>
+            <button
+              onClick={() => handleMirrorRoom('vertical')}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-200/70 hover:bg-slate-300 text-slate-700 text-xs font-bold transition-all cursor-pointer active:scale-95"
+              title="Mirror Vertically (Flip Top ↕ Bottom)"
+            >
+              <FlipVertical className="w-3.5 h-3.5" />
+              <span>Flip ↕</span>
+            </button>
+          </div>
 
           <button
             onClick={() => setRoomShapeModalOpen(false)}

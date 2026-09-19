@@ -1,5 +1,5 @@
 import { db } from '../db/database';
-import { RoomDoor, WallSide, Point2D } from '../types';
+import { RoomDoor, WallSide, Point2D, DoorSwing } from '../types';
 
 export interface DoorSvgGeometry {
   arcD: string;
@@ -272,5 +272,116 @@ export async function nudgeDoor(roomId: string, deltaUnits: number): Promise<voi
       offset: newOffset,
     },
     updatedAt: Date.now(),
+  });
+}
+
+/**
+ * Mirrors (flips) an entire room along either the horizontal or vertical axis:
+ * 1. Polygon vertices (flipped coordinates and reversed winding)
+ * 2. Entrance door position, wall side, and swing hinge
+ * 3. All interior furniture positions and orientations
+ */
+export async function mirrorRoom(roomId: string, axis: 'horizontal' | 'vertical'): Promise<void> {
+  const room = await db.rooms.get(roomId);
+  if (!room) return;
+
+  const W = room.gridWidth;
+  const H = room.gridHeight;
+
+  // 1. Mirror polygon points if present
+  let newPoints: Point2D[] | undefined = undefined;
+  if (room.polygonPoints && room.polygonPoints.length > 0) {
+    if (axis === 'horizontal') {
+      newPoints = room.polygonPoints.map((p) => ({
+        x: W - p.x,
+        y: p.y,
+      })).reverse();
+    } else {
+      newPoints = room.polygonPoints.map((p) => ({
+        x: p.x,
+        y: H - p.y,
+      })).reverse();
+    }
+  }
+
+  // 2. Mirror door
+  const currentDoor = room.door || { wall: 'bottom', offset: 2, swing: 'inward_left', width: 2 };
+  const doorWidth = currentDoor.width || 2;
+  let newWall = currentDoor.wall;
+  let newOffset = currentDoor.offset;
+  let newSwing = currentDoor.swing || 'inward_left';
+
+  const flipSwingMap: Record<DoorSwing, DoorSwing> = {
+    'inward_left': 'inward_right',
+    'inward_right': 'inward_left',
+    'outward_left': 'outward_right',
+    'outward_right': 'outward_left',
+  };
+
+  if (axis === 'horizontal') {
+    if (currentDoor.wall === 'top' || currentDoor.wall === 'bottom') {
+      newOffset = Math.max(0, W - currentDoor.offset - doorWidth);
+      newSwing = flipSwingMap[newSwing] || newSwing;
+    } else if (currentDoor.wall === 'left') {
+      newWall = 'right';
+      newSwing = flipSwingMap[newSwing] || newSwing;
+    } else if (currentDoor.wall === 'right') {
+      newWall = 'left';
+      newSwing = flipSwingMap[newSwing] || newSwing;
+    }
+  } else {
+    // vertical flip
+    if (currentDoor.wall === 'left' || currentDoor.wall === 'right') {
+      newOffset = Math.max(0, H - currentDoor.offset - doorWidth);
+      newSwing = flipSwingMap[newSwing] || newSwing;
+    } else if (currentDoor.wall === 'top') {
+      newWall = 'bottom';
+      newSwing = flipSwingMap[newSwing] || newSwing;
+    } else if (currentDoor.wall === 'bottom') {
+      newWall = 'top';
+      newSwing = flipSwingMap[newSwing] || newSwing;
+    }
+  }
+
+  const newDoor: RoomDoor = {
+    ...currentDoor,
+    wall: newWall,
+    offset: newOffset,
+    swing: newSwing,
+  };
+
+  // 3. Mirror all interior furniture
+  const furnitureInRoom = await db.furniture.where('roomId').equals(room.id).toArray();
+  await db.transaction('rw', [db.rooms, db.furniture], async () => {
+    for (const f of furnitureInRoom) {
+      const isRot = (f.position.rotation || 0) % 180 !== 0;
+      const fW = isRot ? f.dimension.length : f.dimension.width;
+      const fL = isRot ? f.dimension.width : f.dimension.length;
+
+      let newX = f.position.x;
+      let newY = f.position.y;
+      let newRot = f.position.rotation || 0;
+
+      if (axis === 'horizontal') {
+        newX = Math.max(0, Math.min(W - fW, W - (f.position.x + fW)));
+        newRot = (360 - newRot) % 360;
+      } else {
+        newY = Math.max(0, Math.min(H - fL, H - (f.position.y + fL)));
+        newRot = (180 - newRot + 360) % 360;
+      }
+
+      await db.furniture.update(f.id, {
+        'position.x': newX,
+        'position.y': newY,
+        'position.rotation': newRot,
+        updatedAt: Date.now(),
+      });
+    }
+
+    await db.rooms.update(room.id, {
+      polygonPoints: newPoints,
+      door: newDoor,
+      updatedAt: Date.now(),
+    });
   });
 }

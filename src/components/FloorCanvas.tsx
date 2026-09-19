@@ -14,9 +14,11 @@ import {
   Maximize2,
   Sliders,
   Sparkles,
-  DoorOpen
+  DoorOpen,
+  FlipHorizontal,
+  FlipVertical
 } from 'lucide-react';
-import { rotateRoom90Clockwise, getDoorSvgGeometry, nudgeDoor } from '../utils/roomGeometry';
+import { rotateRoom90Clockwise, mirrorRoom, getDoorSvgGeometry, nudgeDoor } from '../utils/roomGeometry';
 
 export const FloorCanvas: React.FC = () => {
   const {
@@ -580,6 +582,32 @@ export const FloorCanvas: React.FC = () => {
             <RotateCw className="w-3.5 h-3.5 text-blue-600" />
             <span className="hidden sm:inline">Rotate 90°</span>
           </button>
+          <button
+            onClick={async () => {
+              if (room) {
+                await mirrorRoom(room.id, 'horizontal');
+                fitRoomToViewport();
+              }
+            }}
+            className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+            title="Mirror Horizontally (Flip Left ↔ Right)"
+          >
+            <FlipHorizontal className="w-3.5 h-3.5 text-blue-600" />
+            <span className="hidden md:inline">Flip ↔</span>
+          </button>
+          <button
+            onClick={async () => {
+              if (room) {
+                await mirrorRoom(room.id, 'vertical');
+                fitRoomToViewport();
+              }
+            }}
+            className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+            title="Mirror Vertically (Flip Top ↕ Bottom)"
+          >
+            <FlipVertical className="w-3.5 h-3.5 text-blue-600" />
+            <span className="hidden md:inline">Flip ↕</span>
+          </button>
           <div className="w-px h-4 bg-slate-200" />
           <button
             onClick={toggleGridSnap}
@@ -823,7 +851,14 @@ export const FloorCanvas: React.FC = () => {
                 appMode === 'edit' ? 'pointer-events-auto opacity-100 scale-100' : 'pointer-events-none opacity-0 scale-90'
               } transition-all duration-150`}
             >
-              <div className="flex items-center gap-1 bg-slate-900/90 text-white backdrop-blur-md px-2 py-1 rounded-full shadow-2xl border border-white/20 text-xs font-bold ring-2 ring-amber-400/40">
+              <div className="relative flex items-center gap-1 bg-slate-900/90 text-white backdrop-blur-md px-2 py-1 rounded-full shadow-2xl border border-white/20 text-xs font-bold ring-2 ring-amber-400/40">
+                {/* Dragging Position HUD Tooltip */}
+                {isDraggingDoor && (
+                  <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-amber-500 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full whitespace-nowrap shadow-lg ring-1 ring-white/40 animate-pulse pointer-events-none z-40">
+                    {activeDoor.offset}m along {activeDoor.wall} wall
+                  </div>
+                )}
+
                 {/* Nudge backward along wall */}
                 <button
                   onClick={async (e) => {
@@ -845,10 +880,10 @@ export const FloorCanvas: React.FC = () => {
                     setRoomShapeModalOpen(true, 'door');
                   }}
                   className="flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-white/20 cursor-grab active:cursor-grabbing transition-colors"
-                  title="Drag along wall, or click to configure Door"
+                  title={`Entrance Door (${activeDoor.width || 2}m wide, ${activeDoor.offset}m from corner on ${activeDoor.wall} wall) — Click to configure`}
                 >
                   <DoorOpen className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="text-[11px] whitespace-nowrap">Door ({activeDoor.offset}m)</span>
+                  <span className="text-[11px] whitespace-nowrap font-bold">Door</span>
                 </div>
 
                 {/* Nudge forward along wall */}
