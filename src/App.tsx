@@ -6,6 +6,7 @@ import { ItemModal } from './components/ItemModal';
 import { SearchModal } from './components/SearchModal';
 import { FurnitureLibrary } from './components/FurnitureLibrary';
 import { RoomManagerModal } from './components/RoomManagerModal';
+import { RoomShapeModal } from './components/RoomShapeModal';
 import { BackupModal } from './components/BackupModal';
 import { seedDemoDataIfEmpty } from './db/sampleData';
 
@@ -16,7 +17,7 @@ export function App() {
   }, []);
 
   return (
-    <div className="flex flex-col w-screen h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
+    <div className="flex flex-col w-screen h-screen bg-slate-100 text-slate-800 overflow-hidden font-sans">
       {/* Top Navbar: Space, Quick Search, Tools */}
       <Header />
 
@@ -31,6 +32,7 @@ export function App() {
       <ItemModal />
       <FurnitureLibrary />
       <RoomManagerModal />
+      <RoomShapeModal />
       <BackupModal />
     </div>
   );

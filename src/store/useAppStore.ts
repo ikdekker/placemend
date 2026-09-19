@@ -1,8 +1,13 @@
 import { create } from 'zustand';
 
-export type ActiveTool = 'select' | 'pan' | 'add-furniture' | 'measure';
+export type AppMode = 'view' | 'edit';
 
 export interface AppState {
+  // Mode: View / Search vs Edit
+  appMode: AppMode;
+  setAppMode: (mode: AppMode) => void;
+  toggleAppMode: () => void;
+
   // Navigation & Space
   selectedLocationId: string | null;
   selectedRoomId: string | null;
@@ -13,9 +18,9 @@ export interface AppState {
   // Canvas Viewport Controls
   zoom: number;
   panOffset: { x: number; y: number };
-  activeTool: ActiveTool;
   gridSnap: boolean;
   showLabels: boolean;
+  isRoomShapeModalOpen: boolean;
 
   // Modals & Panels
   isSearchOpen: boolean;
@@ -37,7 +42,6 @@ export interface AppState {
   setZoom: (zoom: number | ((prev: number) => number)) => void;
   setPanOffset: (offset: { x: number; y: number } | ((prev: { x: number; y: number }) => { x: number; y: number })) => void;
   resetView: () => void;
-  setActiveTool: (tool: ActiveTool) => void;
   toggleGridSnap: () => void;
   toggleShowLabels: () => void;
 
@@ -45,6 +49,7 @@ export interface AppState {
   setSearchOpen: (open: boolean) => void;
   setItemModalOpen: (open: boolean, itemId?: string | null) => void;
   setRoomManagerOpen: (open: boolean) => void;
+  setRoomShapeModalOpen: (open: boolean) => void;
   setFurnitureLibraryOpen: (open: boolean) => void;
   setBackupModalOpen: (open: boolean) => void;
   setSearchQuery: (query: string) => void;
@@ -54,6 +59,10 @@ export interface AppState {
 }
 
 export const useAppStore = create<AppState>((set) => ({
+  appMode: 'view', // default clean view/search mode
+  setAppMode: (mode) => set({ appMode: mode }),
+  toggleAppMode: () => set((s) => ({ appMode: s.appMode === 'view' ? 'edit' : 'view' })),
+
   selectedLocationId: 'loc-home',
   selectedRoomId: 'room-living',
   selectedFurnitureId: null,
@@ -61,10 +70,10 @@ export const useAppStore = create<AppState>((set) => ({
   highlightedFurnitureId: null,
 
   zoom: 1,
-  panOffset: { x: 50, y: 50 },
-  activeTool: 'select',
+  panOffset: { x: 80, y: 80 },
   gridSnap: true,
   showLabels: true,
+  isRoomShapeModalOpen: false,
 
   isSearchOpen: false,
   isItemModalOpen: false,
@@ -90,15 +99,15 @@ export const useAppStore = create<AppState>((set) => ({
       panOffset: typeof offsetOrFn === 'function' ? offsetOrFn(state.panOffset) : offsetOrFn,
     })),
 
-  resetView: () => set({ zoom: 1, panOffset: { x: 60, y: 60 } }),
+  resetView: () => set({ zoom: 1, panOffset: { x: 80, y: 80 } }),
 
-  setActiveTool: (tool) => set({ activeTool: tool }),
   toggleGridSnap: () => set((s) => ({ gridSnap: !s.gridSnap })),
   toggleShowLabels: () => set((s) => ({ showLabels: !s.showLabels })),
 
   setSearchOpen: (open) => set({ isSearchOpen: open }),
   setItemModalOpen: (open, itemId = null) => set({ isItemModalOpen: open, editingItemId: itemId }),
   setRoomManagerOpen: (open) => set({ isRoomManagerOpen: open }),
+  setRoomShapeModalOpen: (open) => set({ isRoomShapeModalOpen: open }),
   setFurnitureLibraryOpen: (open) => set({ isFurnitureLibraryOpen: open }),
   setBackupModalOpen: (open) => set({ isBackupModalOpen: open }),
   setSearchQuery: (query) => set({ searchQuery: query }),
@@ -110,9 +119,9 @@ export const useAppStore = create<AppState>((set) => ({
       highlightedFurnitureId: furnitureId,
       isSearchOpen: false,
     });
-    // Auto-clear highlight pulse after 3.5s
+    // Auto-clear highlight pulse after 4s
     setTimeout(() => {
       set((s) => (s.highlightedFurnitureId === furnitureId ? { highlightedFurnitureId: null } : {}));
-    }, 3500);
+    }, 4000);
   },
 }));

@@ -10,9 +10,16 @@ export type Position = {
   rotation: number; // 0, 90, 180, 270 degrees
 };
 
+export type RoomShapeType = 'rectangle' | 'l_shaped' | 't_shaped' | 'custom_polygon';
+
+export type Point2D = {
+  x: number;
+  y: number;
+};
+
 export type Location = {
   id: string;
-  name: string; // e.g. "Main House", "Warehouse", "Apartment"
+  name: string;
   description?: string;
   createdAt: number;
   updatedAt: number;
@@ -21,11 +28,13 @@ export type Location = {
 export type Room = {
   id: string;
   locationId: string;
-  name: string; // e.g. "Living Room", "Workshop / Garage", "Office"
-  color: string; // Room accent color
-  gridWidth: number; // e.g. 24 units
-  gridHeight: number; // e.g. 18 units
-  unitSize: number; // pixels per grid cell (default 32px)
+  name: string;
+  color: string;
+  gridWidth: number;
+  gridHeight: number;
+  unitSize: number; // pixels per grid cell
+  shapeType?: RoomShapeType; // 'rectangle' | 'l_shaped' | 't_shaped' | 'custom_polygon'
+  polygonPoints?: Point2D[]; // Explicit corner points in grid units for non-rectangular rooms
   createdAt: number;
   updatedAt: number;
 };
@@ -48,7 +57,7 @@ export type FurnitureType =
 export type Furniture = {
   id: string;
   roomId: string;
-  name: string; // e.g. "Standing Desk", "IKEA PAX Closet", "Heavy Metal Rack"
+  name: string;
   type: FurnitureType;
   position: Position;
   dimension: Dimension;
@@ -73,8 +82,8 @@ export type ContainerType =
 export type Container = {
   id: string;
   furnitureId: string;
-  parentContainerId?: string; // Optional nested container (e.g. Small Organizer inside Drawer 1)
-  name: string; // e.g. "Top Drawer", "Shelf #3", "Blue Storage Bin A"
+  parentContainerId?: string;
+  name: string;
   type: ContainerType;
   color?: string;
   orderIndex: number;
@@ -85,13 +94,13 @@ export type Container = {
 
 export type Item = {
   id: string;
-  containerId: string; // Container where the item currently lives
-  name: string; // e.g. "Passport", "Impact Driver 18V", "HDMI Cable 2m"
+  containerId: string;
+  name: string;
   description?: string;
   quantity: number;
-  category?: string; // e.g. "Electronics", "Documents", "Tools", "Clothing"
-  tags: string[]; // e.g. ["urgent", "travel", "cables"]
-  photoDataUrl?: string; // Base64 or local object URL stored locally
+  category?: string;
+  tags: string[];
+  photoDataUrl?: string;
   barcode?: string;
   favorite?: boolean;
   createdAt: number;
