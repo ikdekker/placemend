@@ -1101,18 +1101,6 @@ export const RoomShapeModal: React.FC = () => {
                 </>
               )}
 
-              <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                <span className="text-xs text-emerald-600 font-bold flex items-center gap-1.5">
-                  <Check className="w-4 h-4 text-emerald-500" />
-                  <span>All door changes saved live</span>
-                </span>
-                <button
-                  onClick={() => setRoomShapeModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition-all active:scale-95 cursor-pointer"
-                >
-                  Done
-                </button>
-              </div>
             </div>
           )}
 
@@ -1120,38 +1108,14 @@ export const RoomShapeModal: React.FC = () => {
 
         {/* Footer */}
         <div className="p-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={handleRotateRoom90}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-200/70 hover:bg-slate-300 text-slate-700 text-xs font-bold transition-all cursor-pointer active:scale-95"
-              title="Rotate 90°"
-            >
-              <RotateCw className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Rotate 90°</span>
-            </button>
-            <button
-              onClick={() => handleMirrorRoom('horizontal')}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-200/70 hover:bg-slate-300 text-slate-700 text-xs font-bold transition-all cursor-pointer active:scale-95"
-              title="Mirror Horizontally (Flip Left ↔ Right)"
-            >
-              <FlipHorizontal className="w-3.5 h-3.5" />
-              <span>Flip ↔</span>
-            </button>
-            <button
-              onClick={() => handleMirrorRoom('vertical')}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-200/70 hover:bg-slate-300 text-slate-700 text-xs font-bold transition-all cursor-pointer active:scale-95"
-              title="Mirror Vertically (Flip Top ↕ Bottom)"
-            >
-              <FlipVertical className="w-3.5 h-3.5" />
-              <span>Flip ↕</span>
-            </button>
-          </div>
-
+          <span className="text-[11px] text-slate-400 font-medium px-1">
+            All changes save automatically
+          </span>
           <button
             onClick={() => setRoomShapeModalOpen(false)}
-            className="px-4 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs cursor-pointer"
+            className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition-all active:scale-95 cursor-pointer"
           >
-            Close
+            Done
           </button>
         </div>
       </div>
