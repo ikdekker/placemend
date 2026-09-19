@@ -46,6 +46,7 @@ export const SEED_FURNITURE: Furniture[] = [
     color: '#0f766e', // Deep Teal Cabinet
     icon: 'Tv',
     notes: 'Under the TV with 3 slide-out storage drawers',
+    facadeLayout: 'horizontal_row',
     createdAt: Date.now(),
     updatedAt: Date.now(),
   },
@@ -59,6 +60,7 @@ export const SEED_FURNITURE: Furniture[] = [
     color: '#475569', // Slate Charcoal
     icon: 'Library',
     notes: 'Grid shelf with storage inserts and display items',
+    facadeLayout: 'grid',
     createdAt: Date.now(),
     updatedAt: Date.now(),
   },
@@ -109,7 +111,8 @@ export const SEED_CONTAINERS: Container[] = [
   {
     id: 'cont-console-d1',
     furnitureId: 'furn-media-console',
-    name: 'Left Drawer (Cables & Adapters)',
+    name: 'Left Drawer',
+    notes: 'Cables & Adapters',
     type: 'drawer',
     orderIndex: 0,
     createdAt: Date.now(),
@@ -118,7 +121,8 @@ export const SEED_CONTAINERS: Container[] = [
   {
     id: 'cont-console-d2',
     furnitureId: 'furn-media-console',
-    name: 'Middle Drawer (Gaming & Remotes)',
+    name: 'Middle Drawer',
+    notes: 'Gaming & Remotes',
     type: 'drawer',
     orderIndex: 1,
     createdAt: Date.now(),
@@ -127,7 +131,8 @@ export const SEED_CONTAINERS: Container[] = [
   {
     id: 'cont-console-d3',
     furnitureId: 'furn-media-console',
-    name: 'Right Drawer (Documents & Manuals)',
+    name: 'Right Drawer',
+    notes: 'Documents & Manuals',
     type: 'drawer',
     orderIndex: 2,
     createdAt: Date.now(),
@@ -138,7 +143,8 @@ export const SEED_CONTAINERS: Container[] = [
   {
     id: 'cont-kallax-bin1',
     furnitureId: 'furn-bookshelf-tall',
-    name: 'Bottom Left DRÖNA Box (Board Games)',
+    name: 'Bottom Left DRÖNA Box',
+    notes: 'Board Games',
     type: 'box',
     orderIndex: 0,
     createdAt: Date.now(),
@@ -167,7 +173,8 @@ export const SEED_CONTAINERS: Container[] = [
   {
     id: 'cont-kallax-bin2',
     furnitureId: 'furn-bookshelf-tall',
-    name: 'Bottom Right DRÖNA Box (Spare Tech)',
+    name: 'Bottom Right DRÖNA Box',
+    notes: 'Spare Tech',
     type: 'box',
     orderIndex: 1,
     createdAt: Date.now(),
@@ -176,7 +183,8 @@ export const SEED_CONTAINERS: Container[] = [
   {
     id: 'cont-kallax-s2',
     furnitureId: 'furn-bookshelf-tall',
-    name: 'Middle Open Shelf (Books & Kindle)',
+    name: 'Middle Open Shelf',
+    notes: 'Books & Kindle',
     type: 'shelf',
     orderIndex: 2,
     createdAt: Date.now(),

@@ -62,14 +62,14 @@ export const DrawerInteriorView: React.FC = () => {
     return await db.items.where('containerId').equals(selectedContainerId).toArray();
   }, [selectedContainerId]) || [];
 
-  // Items in child compartments (for count)
+  // Items in child compartments (for unique item count)
   const childItemCounts = useLiveQuery(async () => {
     if (childCompartments.length === 0) return {};
     const childIds = childCompartments.map((c) => c.id);
     const childItems = await db.items.where('containerId').anyOf(childIds).toArray();
     const counts: Record<string, number> = {};
     childItems.forEach((it) => {
-      counts[it.containerId] = (counts[it.containerId] || 0) + it.quantity;
+      counts[it.containerId] = (counts[it.containerId] || 0) + 1;
     });
     return counts;
   }, [childCompartments]) || {};

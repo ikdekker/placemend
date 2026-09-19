@@ -68,7 +68,7 @@ export function useVisualSearch(): VisualSearchResult {
           matchingContainerIds.add(currentContId);
           matchCountsByContainer.set(
             currentContId,
-            (matchCountsByContainer.get(currentContId) || 0) + item.quantity
+            (matchCountsByContainer.get(currentContId) || 0) + 1
           );
 
           const c = containerMap.get(currentContId);
@@ -84,7 +84,7 @@ export function useVisualSearch(): VisualSearchResult {
           matchingFurnitureIds.add(furnId);
           matchCountsByFurniture.set(
             furnId,
-            (matchCountsByFurniture.get(furnId) || 0) + item.quantity
+            (matchCountsByFurniture.get(furnId) || 0) + 1
           );
 
           const furn = furnitureMap.get(furnId);
@@ -92,7 +92,7 @@ export function useVisualSearch(): VisualSearchResult {
             matchingRoomIds.add(furn.roomId);
             matchCountsByRoom.set(
               furn.roomId,
-              (matchCountsByRoom.get(furn.roomId) || 0) + item.quantity
+              (matchCountsByRoom.get(furn.roomId) || 0) + 1
             );
           }
         }

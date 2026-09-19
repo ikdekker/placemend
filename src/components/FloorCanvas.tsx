@@ -82,7 +82,7 @@ export const FloorCanvas: React.FC = () => {
     return await db.furniture.where('roomId').equals(selectedRoomId).toArray();
   }, [selectedRoomId]) || [];
 
-  // Items grouped by furniture for item counts
+  // Items grouped by furniture for unique item counts
   const itemCountsByFurniture = useLiveQuery(async () => {
     const containers = await db.containers.toArray();
     const items = await db.items.toArray();
@@ -95,7 +95,7 @@ export const FloorCanvas: React.FC = () => {
     items.forEach((item) => {
       const furnId = containerToFurniture[item.containerId];
       if (furnId) {
-        counts[furnId] = (counts[furnId] || 0) + item.quantity;
+        counts[furnId] = (counts[furnId] || 0) + 1;
       }
     });
     return counts;

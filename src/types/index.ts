@@ -64,6 +64,8 @@ export type Furniture = {
   color: string;
   icon?: string;
   notes?: string;
+  photoDataUrl?: string;
+  facadeLayout?: 'horizontal_row' | 'grid' | 'vertical_stack';
   createdAt: number;
   updatedAt: number;
 };
