@@ -101,7 +101,7 @@ export const SearchModal: React.FC = () => {
     >
       <div 
         onClick={(e) => e.stopPropagation()}
-        className="w-full md:max-w-xl bg-white rounded-t-3xl md:rounded-3xl shadow-2xl flex flex-col max-h-[90vh] md:max-h-[85vh] overflow-hidden border border-slate-200 animate-in slide-in-from-bottom-4 duration-200"
+        className="w-full md:max-w-xl bg-white rounded-t-3xl md:rounded-3xl shadow-2xl flex flex-col h-[85vh] md:h-auto md:max-h-[85vh] overflow-hidden border border-slate-200 animate-in slide-in-from-bottom-4 duration-200"
       >
         {/* Mobile Swipe Drag Indicator Handle */}
         <div className="md:hidden w-full flex justify-center pt-2.5 pb-1 cursor-grab">
