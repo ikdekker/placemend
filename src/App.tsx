@@ -8,6 +8,8 @@ import { FurnitureLibrary } from './components/FurnitureLibrary';
 import { RoomManagerModal } from './components/RoomManagerModal';
 import { RoomShapeModal } from './components/RoomShapeModal';
 import { BackupModal } from './components/BackupModal';
+import { SearchModal } from './components/SearchModal';
+import { FloatingSearchBanner } from './components/FloatingSearchBanner';
 import { MobileNav } from './components/MobileNav';
 import { seedDemoDataIfEmpty } from './db/sampleData';
 import { useAppStore } from './store/useAppStore';
@@ -21,12 +23,15 @@ export function App() {
   }, []);
 
   return (
-    <div className="flex flex-col w-screen h-screen bg-slate-100 text-slate-800 overflow-hidden font-sans pb-16 md:pb-0">
+    <div className="flex flex-col w-screen h-screen bg-slate-100 text-slate-800 overflow-hidden font-sans pb-16 md:pb-0 relative">
       {/* Top Navbar: Space, Quick Search, Tools */}
       <Header />
 
       {/* Main Workspace Area: True Visual Zoom Navigation */}
       <main className="flex-1 min-h-0 w-full relative flex flex-col overflow-hidden">
+        {/* Floating Active Search Pill (when search is illuminating rooms) */}
+        <FloatingSearchBanner />
+
         {selectedFurnitureId === null ? (
           <FloorCanvas />
         ) : selectedContainerId === null ? (
@@ -39,7 +44,8 @@ export function App() {
       {/* Mobile Bottom Quick Dock */}
       <MobileNav />
 
-      {/* Modals */}
+      {/* Modals & Sheets */}
+      <SearchModal />
       <ItemModal />
       <FurnitureLibrary />
       <RoomManagerModal />

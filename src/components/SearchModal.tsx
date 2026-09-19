@@ -1,213 +1,317 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
-import { SearchResult } from '../types';
+import { useVisualSearch } from '../hooks/useVisualSearch';
+import { SearchResult, Item } from '../types';
 import { 
   Search, 
   MapPin, 
-  Box, 
-  Tag, 
-  ArrowRight, 
   X, 
-  ChevronRight,
-  Package,
-  Layers
+  ArrowRight, 
+  ChevronRight, 
+  Cable, 
+  Dices, 
+  BookOpen, 
+  Wrench, 
+  Package, 
+  Star, 
+  Zap, 
+  Map, 
+  Sparkles,
+  SlidersHorizontal
 } from 'lucide-react';
 
 export const SearchModal: React.FC = () => {
   const {
     isSearchOpen,
     setSearchOpen,
+    searchQuery,
+    setSearchQuery,
+    clearSearch,
     locateFurniture,
   } = useAppStore();
 
-  const [query, setQuery] = useState('');
+  const {
+    isSearching,
+    totalMatches,
+    matchingResults,
+    matchCountsByRoom,
+  } = useVisualSearch();
+
+  const [selectedRoomFilter, setSelectedRoomFilter] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Auto focus input when opened on mobile/desktop
   useEffect(() => {
     if (isSearchOpen) {
-      setTimeout(() => inputRef.current?.focus(), 50);
+      setTimeout(() => inputRef.current?.focus(), 80);
     } else {
-      setQuery('');
+      setSelectedRoomFilter(null);
     }
   }, [isSearchOpen]);
 
-  // Live searchable index across Items, Containers, Furniture, Rooms & Locations
-  const searchResults: SearchResult[] = useLiveQuery(async () => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-
-    const items = await db.items.toArray();
-    const containers = await db.containers.toArray();
-    const furniture = await db.furniture.toArray();
-    const rooms = await db.rooms.toArray();
-    const locations = await db.locations.toArray();
-
-    const containerMap = new Map(containers.map((c) => [c.id, c]));
-    const furnitureMap = new Map(furniture.map((f) => [f.id, f]));
-    const roomMap = new Map(rooms.map((r) => [r.id, r]));
-    const locationMap = new Map(locations.map((l) => [l.id, l]));
-
-    const results: SearchResult[] = [];
-
-    for (const item of items) {
-      const nameMatch = item.name.toLowerCase().includes(q);
-      const tagMatch = item.tags?.some((t) => t.toLowerCase().includes(q));
-      const catMatch = item.category?.toLowerCase().includes(q);
-      const descMatch = item.description?.toLowerCase().includes(q);
-
-      if (nameMatch || tagMatch || catMatch || descMatch) {
-        const container = containerMap.get(item.containerId);
-        if (!container) continue;
-
-        const furn = furnitureMap.get(container.furnitureId);
-        if (!furn) continue;
-
-        const rm = roomMap.get(furn.roomId);
-        if (!rm) continue;
-
-        const loc = locationMap.get(rm.locationId) || {
-          id: 'unknown',
-          name: 'Home',
-          createdAt: 0,
-          updatedAt: 0,
-        };
-
-        let score = 0;
-        let matchedOn: SearchResult['matchedOn'] = 'name';
-
-        if (nameMatch) {
-          score = item.name.toLowerCase().startsWith(q) ? 100 : 80;
-          matchedOn = 'name';
-        } else if (tagMatch) {
-          score = 60;
-          matchedOn = 'tag';
-        } else if (catMatch) {
-          score = 40;
-          matchedOn = 'category';
-        } else {
-          score = 20;
-          matchedOn = 'description';
-        }
-
-        results.push({
-          item,
-          container,
-          furniture: furn,
-          room: rm,
-          location: loc,
-          matchScore: score,
-          matchedOn,
-        });
-      }
-    }
-
-    return results.sort((a, b) => b.matchScore - a.matchScore);
-  }, [query]) || [];
-
   if (!isSearchOpen) return null;
+
+  // Filter results by selected room tab if any
+  const filteredResults = selectedRoomFilter
+    ? matchingResults.filter((r) => r.room.id === selectedRoomFilter)
+    : matchingResults;
+
+  // Rooms that have matches
+  const roomsWithMatches = Array.from(matchCountsByRoom.entries())
+    .filter(([_, count]) => count > 0)
+    .map(([roomId, count]) => {
+      const match = matchingResults.find((r) => r.room.id === roomId);
+      return {
+        id: roomId,
+        name: match?.room.name || 'Room',
+        count,
+      };
+    });
+
+  const getItemVisualIcon = (item: Item) => {
+    const text = (item.name + ' ' + (item.category || '')).toLowerCase();
+    if (text.includes('cable') || text.includes('usb') || text.includes('hdmi') || text.includes('charger') || text.includes('adapter')) {
+      return <Cable className="w-5 h-5 text-cyan-600" />;
+    }
+    if (text.includes('game') || text.includes('catan') || text.includes('dice') || text.includes('poker') || text.includes('playstation') || text.includes('controller')) {
+      return <Dices className="w-5 h-5 text-purple-600" />;
+    }
+    if (text.includes('book') || text.includes('kindle') || text.includes('manual') || text.includes('notebook')) {
+      return <BookOpen className="w-5 h-5 text-amber-600" />;
+    }
+    if (text.includes('tool') || text.includes('caliper') || text.includes('wrench') || text.includes('meter') || text.includes('hex') || text.includes('screw')) {
+      return <Wrench className="w-5 h-5 text-orange-600" />;
+    }
+    return <Package className="w-5 h-5 text-blue-600" />;
+  };
 
   const handleSelectResult = (result: SearchResult) => {
     locateFurniture(result.room.id, result.furniture.id, result.container.id);
   };
 
+  const handleQuickChip = (term: string) => {
+    setSearchQuery(term);
+    inputRef.current?.focus();
+  };
+
   return (
     <div 
       onClick={() => setSearchOpen(false)}
-      className="fixed inset-0 z-50 flex items-start justify-center pt-16 sm:pt-24 p-4 bg-black/80 backdrop-blur-md select-none"
+      className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center bg-black/60 backdrop-blur-xs select-none p-0 md:p-4 animate-in fade-in duration-150"
     >
       <div 
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh] animate-in fade-in zoom-in-95 duration-100"
+        className="w-full md:max-w-xl bg-white rounded-t-3xl md:rounded-3xl shadow-2xl flex flex-col max-h-[90vh] md:max-h-[85vh] overflow-hidden border border-slate-200 animate-in slide-in-from-bottom-4 duration-200"
       >
-        {/* Search Input Bar */}
-        <div className="p-3.5 border-b border-slate-800 flex items-center gap-3 bg-slate-900/90">
-          <Search className="w-5 h-5 text-blue-400 flex-shrink-0" />
-          <input
-            ref={inputRef}
-            type="text"
-            placeholder="Search items, tools, cables, documents, tags..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="flex-1 bg-transparent text-white text-base focus:outline-none placeholder:text-slate-500 font-medium"
-          />
-          {query && (
-            <button
-              onClick={() => setQuery('')}
-              className="text-slate-500 hover:text-white p-1 rounded-md"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
+        {/* Mobile Swipe Drag Indicator Handle */}
+        <div className="md:hidden w-full flex justify-center pt-2.5 pb-1 cursor-grab">
+          <div className="w-12 h-1.5 rounded-full bg-slate-300" />
+        </div>
+
+        {/* Top Search Input Bar */}
+        <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-2.5 bg-white flex-shrink-0">
+          <div className="flex-1 relative flex items-center">
+            <Search className="w-5 h-5 text-blue-600 absolute left-3.5 pointer-events-none" />
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search items, cables, tools, tags..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-11 pr-10 py-3 rounded-2xl border-2 border-slate-200 focus:border-blue-500 bg-slate-50 focus:bg-white text-sm sm:text-base font-bold text-slate-900 focus:outline-none focus:ring-3 focus:ring-blue-100 transition-all shadow-inner"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 p-1 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
+                title="Clear query"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
           <button
             onClick={() => setSearchOpen(false)}
-            className="text-xs font-mono bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded-lg border border-slate-700 transition-colors"
+            className="px-3.5 py-3 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs sm:text-sm transition-all cursor-pointer flex-shrink-0 active:scale-95 min-h-[46px]"
           >
-            ESC
+            Done
           </button>
         </div>
 
+        {/* Quick Filter Chips (1-tap searching) */}
+        <div className="px-3 sm:px-4 py-2 bg-slate-50/80 border-b border-slate-100 flex items-center gap-1.5 overflow-x-auto no-scrollbar flex-shrink-0">
+          <span className="text-[11px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1 mr-1 flex-shrink-0">
+            <Sparkles className="w-3 h-3 text-amber-500" />
+            <span>Quick:</span>
+          </span>
+          {[
+            { label: '🔌 Cables', term: 'cable' },
+            { label: '🛠️ Tools', term: 'tool' },
+            { label: '🎮 Games', term: 'game' },
+            { label: '📖 Books', term: 'book' },
+            { label: '⭐ Starred', term: 'is:starred' },
+            { label: '📦 Multi-Packs', term: 'is:pack' },
+          ].map((chip) => {
+            const isActive = searchQuery.toLowerCase() === chip.term;
+            return (
+              <button
+                key={chip.term}
+                onClick={() => handleQuickChip(chip.term)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 shadow-xs active:scale-95 ${
+                  isActive
+                    ? 'bg-blue-600 text-white shadow-blue-500/20 ring-2 ring-blue-300'
+                    : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+                }`}
+              >
+                {chip.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Room Filter Tabs (when matches span rooms) */}
+        {roomsWithMatches.length > 1 && (
+          <div className="px-3 sm:px-4 py-2 bg-white border-b border-slate-100 flex items-center gap-1.5 overflow-x-auto no-scrollbar flex-shrink-0">
+            <button
+              onClick={() => setSelectedRoomFilter(null)}
+              className={`px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                selectedRoomFilter === null
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              All Rooms ({totalMatches})
+            </button>
+            {roomsWithMatches.map((rm) => (
+              <button
+                key={rm.id}
+                onClick={() => setSelectedRoomFilter(rm.id)}
+                className={`px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1 ${
+                  selectedRoomFilter === rm.id
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                <span>{rm.name}</span>
+                <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+                  selectedRoomFilter === rm.id ? 'bg-blue-800 text-white' : 'bg-slate-200 text-slate-600'
+                }`}>
+                  {rm.count}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Results List */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
-          {!query ? (
-            <div className="py-12 text-center text-slate-500">
-              <Package className="w-8 h-8 stroke-1 text-slate-600 mx-auto mb-2" />
-              <p className="text-xs font-medium">Type any item or keyword to locate it</p>
-              <p className="text-[11px] text-slate-600 mt-0.5">
-                e.g. "drill", "passport", "cables", "games", "charger"
-              </p>
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 sm:p-4 space-y-2.5">
+          {!searchQuery.trim() ? (
+            /* Empty State: Helpful guidance & suggestions */
+            <div className="py-12 px-4 text-center flex flex-col items-center justify-center gap-3">
+              <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shadow-xs">
+                <Search className="w-7 h-7" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-slate-800 text-sm sm:text-base">
+                  Search across your entire home
+                </h3>
+                <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
+                  Type an item name, or tap a quick category chip above to locate where things are stored.
+                </p>
+              </div>
             </div>
-          ) : searchResults.length === 0 ? (
-            <div className="py-12 text-center text-slate-500">
-              <p className="text-xs font-medium">No items found matching "{query}"</p>
+          ) : filteredResults.length === 0 ? (
+            /* No Results Found */
+            <div className="py-12 px-4 text-center flex flex-col items-center justify-center gap-2">
+              <Package className="w-10 h-10 text-slate-300 stroke-1" />
+              <h3 className="font-bold text-slate-700 text-sm">No items matching "{searchQuery}"</h3>
+              <p className="text-xs text-slate-400">
+                Try searching with broader terms or check spelling.
+              </p>
+              <button
+                onClick={() => setSearchQuery('')}
+                className="mt-2 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold text-slate-600 cursor-pointer"
+              >
+                Clear Search
+              </button>
             </div>
           ) : (
-            searchResults.map((res) => (
+            /* Matching Items */
+            filteredResults.map((res) => (
               <div
                 key={res.item.id}
+                data-testid="search-result-card"
                 onClick={() => handleSelectResult(res)}
-                className="p-3 rounded-xl bg-slate-800/60 hover:bg-blue-950/40 border border-slate-700/60 hover:border-blue-500/60 transition-all cursor-pointer flex items-center justify-between gap-3 group shadow-sm"
+                className="p-3.5 sm:p-4 rounded-2xl bg-white hover:bg-blue-50/40 border-2 border-slate-200 hover:border-blue-400 transition-all cursor-pointer flex items-center justify-between gap-3 group shadow-xs hover:shadow-md active:scale-98"
               >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-bold text-sm text-white group-hover:text-blue-200">
-                      {res.item.name}
-                    </span>
-                    {res.item.quantity > 1 && (
-                      <span className="text-[10px] font-mono text-blue-300 bg-blue-950/80 px-1.5 py-0.2 rounded-full border border-blue-800/40">
-                        ×{res.item.quantity}
-                      </span>
-                    )}
-                    {res.item.category && (
-                      <span className="text-[9px] font-mono uppercase bg-slate-800 text-slate-400 px-1.5 py-0.2 rounded">
-                        {res.item.category}
-                      </span>
-                    )}
+                {/* Left: Visual Icon + Item Info + Breadcrumbs */}
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className="w-12 h-12 rounded-xl bg-slate-100 group-hover:bg-white border border-slate-200/80 shadow-xs flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
+                    {getItemVisualIcon(res.item)}
                   </div>
 
-                  {/* Visual Breadcrumb Location Path */}
-                  <div className="flex items-center gap-1 text-xs text-slate-400 mt-1 flex-wrap font-medium">
-                    <span className="text-blue-400 flex items-center gap-1">
-                      <MapPin className="w-3 h-3" />
-                      {res.room.name}
-                    </span>
-                    <ChevronRight className="w-3 h-3 text-slate-600" />
-                    <span className="text-slate-200 font-semibold">{res.furniture.name}</span>
-                    <ChevronRight className="w-3 h-3 text-slate-600" />
-                    <span className="text-slate-400">{res.container.name}</span>
+                  <div className="truncate min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="font-extrabold text-sm sm:text-base text-slate-900 group-hover:text-blue-600 truncate">
+                        {res.item.name}
+                      </h4>
+                      {res.item.quantity > 1 && (
+                        <span className="text-xs font-mono font-black text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
+                          ×{res.item.quantity}
+                        </span>
+                      )}
+                      {res.item.favorite && (
+                        <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500 flex-shrink-0" />
+                      )}
+                    </div>
+
+                    {/* Hierarchical Breadcrumb Path */}
+                    <div className="flex items-center gap-1 text-[11px] sm:text-xs text-slate-400 mt-1 font-medium truncate">
+                      <span className="text-blue-600 font-bold flex items-center gap-0.5 truncate">
+                        <MapPin className="w-3 h-3 flex-shrink-0" />
+                        <span>{res.room.name}</span>
+                      </span>
+                      <ChevronRight className="w-3 h-3 text-slate-300 flex-shrink-0" />
+                      <span className="text-slate-700 font-semibold truncate">{res.furniture.name}</span>
+                      <ChevronRight className="w-3 h-3 text-slate-300 flex-shrink-0" />
+                      <span className="text-slate-500 truncate">{res.container.name}</span>
+                    </div>
                   </div>
                 </div>
 
-                {/* Jump to Canvas Button */}
-                <div className="flex items-center gap-1 text-xs font-semibold text-blue-400 group-hover:text-blue-300 bg-slate-800 group-hover:bg-blue-600 group-hover:text-white px-2.5 py-1.5 rounded-lg transition-all flex-shrink-0 shadow-sm">
-                  <span>Locate</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </div>
+                {/* Right: Direct Locate Button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleSelectResult(res);
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-100 group-hover:bg-blue-600 text-slate-700 group-hover:text-white font-extrabold text-xs transition-all flex items-center gap-1 flex-shrink-0 shadow-xs active:scale-95"
+                  title="Open this item"
+                >
+                  <span className="hidden sm:inline">Open</span>
+                  <ArrowRight className="w-3.5 h-3.5 stroke-[2.5]" />
+                </button>
               </div>
             ))
           )}
         </div>
+
+        {/* Sticky Bottom Action Bar: View Spotlight on Floor Plan */}
+        {isSearching && matchingResults.length > 0 && (
+          <div className="p-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2 flex-shrink-0">
+            <span className="text-xs font-extrabold text-slate-600 pl-1">
+              ⚡ {matchingResults.length} {matchingResults.length === 1 ? 'match' : 'matches'} located
+            </span>
+            <button
+              onClick={() => setSearchOpen(false)}
+              className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-black text-xs sm:text-sm shadow-md shadow-amber-500/20 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 min-h-[42px]"
+            >
+              <Map className="w-4 h-4" />
+              <span>Show on Floor Plan</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

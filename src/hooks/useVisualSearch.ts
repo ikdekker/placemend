@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
+import { SearchResult, Location } from '../types';
 
 export interface VisualSearchResult {
   isSearching: boolean;
@@ -13,6 +14,7 @@ export interface VisualSearchResult {
   matchCountsByRoom: Map<string, number>;
   matchCountsByFurniture: Map<string, number>;
   matchCountsByContainer: Map<string, number>;
+  matchingResults: SearchResult[];
 }
 
 export function useVisualSearch(): VisualSearchResult {
@@ -32,15 +34,20 @@ export function useVisualSearch(): VisualSearchResult {
         matchCountsByRoom: new Map<string, number>(),
         matchCountsByFurniture: new Map<string, number>(),
         matchCountsByContainer: new Map<string, number>(),
+        matchingResults: [],
       };
     }
 
     const items = await db.items.toArray();
     const containers = await db.containers.toArray();
     const furniture = await db.furniture.toArray();
+    const rooms = await db.rooms.toArray();
+    const locations = await db.locations.toArray();
 
     const containerMap = new Map(containers.map((c) => [c.id, c]));
     const furnitureMap = new Map(furniture.map((f) => [f.id, f]));
+    const roomMap = new Map(rooms.map((r) => [r.id, r]));
+    const locationMap = new Map(locations.map((l) => [l.id, l]));
 
     const matchingRoomIds = new Set<string>();
     const matchingFurnitureIds = new Set<string>();
@@ -49,18 +56,70 @@ export function useVisualSearch(): VisualSearchResult {
     const matchCountsByRoom = new Map<string, number>();
     const matchCountsByFurniture = new Map<string, number>();
     const matchCountsByContainer = new Map<string, number>();
+    const matchingResults: SearchResult[] = [];
+
+    // Query terms for multi-word search
+    const terms = q.split(/\s+/).filter(Boolean);
+    const isStarredQuery = q === 'is:starred' || q === 'starred' || q === 'favorite';
+    const isPackQuery = q === 'is:pack' || q === 'packs' || q === 'multipack';
 
     // 1. Direct Item Matches
     for (const item of items) {
-      const nameMatch = item.name.toLowerCase().includes(q);
-      const tagMatch = item.tags?.some((t) => t.toLowerCase().includes(q));
-      const catMatch = item.category?.toLowerCase().includes(q);
-      const descMatch = item.description?.toLowerCase().includes(q);
+      const nameLower = item.name.toLowerCase();
+      const catLower = (item.category || '').toLowerCase();
+      const descLower = (item.description || '').toLowerCase();
+      const tagsLower = (item.tags || []).map((t) => t.toLowerCase());
 
-      if (nameMatch || tagMatch || catMatch || descMatch) {
+      let matches = false;
+      let matchedOn: SearchResult['matchedOn'] = 'name';
+      let score = 0;
+
+      if (isStarredQuery) {
+        if (item.favorite) {
+          matches = true;
+          score = 100;
+          matchedOn = 'tag';
+        }
+      } else if (isPackQuery) {
+        if (item.quantity > 1) {
+          matches = true;
+          score = 100;
+          matchedOn = 'tag';
+        }
+      } else {
+        // Multi-term matching: all words must be found somewhere in the item fields
+        const allTermsMatch = terms.every((term) =>
+          nameLower.includes(term) ||
+          catLower.includes(term) ||
+          descLower.includes(term) ||
+          tagsLower.some((t) => t.includes(term))
+        );
+
+        if (allTermsMatch) {
+          matches = true;
+          if (nameLower.startsWith(q)) {
+            score = 100;
+            matchedOn = 'name';
+          } else if (nameLower.includes(q)) {
+            score = 85;
+            matchedOn = 'name';
+          } else if (tagsLower.some((t) => t.includes(q))) {
+            score = 70;
+            matchedOn = 'tag';
+          } else if (catLower.includes(q)) {
+            score = 60;
+            matchedOn = 'category';
+          } else {
+            score = 40;
+            matchedOn = 'description';
+          }
+        }
+      }
+
+      if (matches) {
         matchingItemIds.add(item.id);
 
-        // Find parent container
+        // Find parent container hierarchy
         let currentContId: string | undefined = item.containerId;
         let furnId: string | undefined;
 
@@ -94,6 +153,27 @@ export function useVisualSearch(): VisualSearchResult {
               furn.roomId,
               (matchCountsByRoom.get(furn.roomId) || 0) + 1
             );
+
+            const directContainer = containerMap.get(item.containerId);
+            const targetRoom = roomMap.get(furn.roomId);
+            if (directContainer && targetRoom) {
+              const defaultLoc: Location = {
+                id: 'loc-home',
+                name: 'Home',
+                createdAt: 0,
+                updatedAt: 0,
+              };
+              const loc = locationMap.get(targetRoom.locationId) || defaultLoc;
+              matchingResults.push({
+                item,
+                container: directContainer,
+                furniture: furn,
+                room: targetRoom,
+                location: loc,
+                matchScore: score,
+                matchedOn,
+              });
+            }
           }
         }
       }
@@ -130,6 +210,9 @@ export function useVisualSearch(): VisualSearchResult {
       }
     }
 
+    // Sort matching results by relevance score
+    matchingResults.sort((a, b) => b.matchScore - a.matchScore);
+
     return {
       isSearching: true,
       searchQuery: q,
@@ -141,6 +224,7 @@ export function useVisualSearch(): VisualSearchResult {
       matchCountsByRoom,
       matchCountsByFurniture,
       matchCountsByContainer,
+      matchingResults,
     };
   }, [searchQuery]);
 
@@ -156,6 +240,7 @@ export function useVisualSearch(): VisualSearchResult {
       matchCountsByRoom: new Map<string, number>(),
       matchCountsByFurniture: new Map<string, number>(),
       matchCountsByContainer: new Map<string, number>(),
+      matchingResults: [],
     }
   );
 }
