@@ -3,12 +3,10 @@ import { useAppStore } from '../store/useAppStore';
 import { useVisualSearch } from '../hooks/useVisualSearch';
 import { 
   Search, 
-  Layers, 
   Plus, 
   SlidersHorizontal, 
   Eye, 
   Edit3,
-  Maximize2,
   Zap
 } from 'lucide-react';
 
@@ -20,7 +18,6 @@ export const MobileNav: React.FC = () => {
     setSearchOpen,
     setFurnitureLibraryOpen,
     setRoomManagerOpen,
-    resetView,
   } = useAppStore();
 
   const { isSearching, totalMatches } = useVisualSearch();
@@ -77,17 +74,6 @@ export const MobileNav: React.FC = () => {
           <SlidersHorizontal className="w-5 h-5" />
         </div>
         <span className="text-[11px] font-black truncate">Rooms</span>
-      </button>
-
-      {/* Recenter */}
-      <button
-        onClick={() => resetView()}
-        className="flex-1 min-w-0 flex flex-col items-center justify-center gap-1 text-slate-600 hover:text-blue-600 transition-colors cursor-pointer py-1 min-h-[52px]"
-      >
-        <div className="p-2 rounded-xl bg-slate-100">
-          <Maximize2 className="w-5 h-5 text-blue-600" />
-        </div>
-        <span className="text-[11px] font-black truncate">Center</span>
       </button>
     </div>
   );
