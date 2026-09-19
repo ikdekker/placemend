@@ -109,7 +109,7 @@ export const SearchModal: React.FC = () => {
   if (!isSearchOpen) return null;
 
   const handleSelectResult = (result: SearchResult) => {
-    locateFurniture(result.room.id, result.furniture.id);
+    locateFurniture(result.room.id, result.furniture.id, result.container.id);
   };
 
   return (

@@ -145,6 +145,26 @@ export const SEED_CONTAINERS: Container[] = [
     updatedAt: Date.now(),
   },
   {
+    id: 'cont-kallax-bin1-sub1',
+    furnitureId: 'furn-bookshelf-tall',
+    parentContainerId: 'cont-kallax-bin1',
+    name: 'Card Games & Dice Tray',
+    type: 'compartment',
+    orderIndex: 0,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+  {
+    id: 'cont-kallax-bin1-sub2',
+    furnitureId: 'furn-bookshelf-tall',
+    parentContainerId: 'cont-kallax-bin1',
+    name: 'Big Box Strategy Games',
+    type: 'compartment',
+    orderIndex: 1,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+  {
     id: 'cont-kallax-bin2',
     furnitureId: 'furn-bookshelf-tall',
     name: 'Bottom Right DRÖNA Box (Spare Tech)',
@@ -278,13 +298,25 @@ export const SEED_ITEMS: Item[] = [
   // Bookshelf items
   {
     id: 'item-catan',
-    containerId: 'cont-kallax-bin1',
+    containerId: 'cont-kallax-bin1-sub2',
     name: 'Settlers of Catan (Base Game + 5-6 Player Expansion)',
     description: 'Complete set with all wooden pieces and cards',
     quantity: 1,
     category: 'Games',
     tags: ['boardgame', 'friends', 'catan'],
     favorite: true,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+  {
+    id: 'item-card-games',
+    containerId: 'cont-kallax-bin1-sub1',
+    name: 'Exploding Kittens & Premium Poker Playing Cards',
+    description: 'Stored in compact deck boxes',
+    quantity: 2,
+    category: 'Games',
+    tags: ['boardgame', 'party', 'cards'],
+    favorite: false,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   },
@@ -363,5 +395,12 @@ export async function seedDemoDataIfEmpty() {
       await db.items.bulkAdd(SEED_ITEMS);
     });
     console.log('Placemend demo database initialized with sample apartment data!');
+  } else {
+    // Ensure nested demo compartments exist for previously initialized databases
+    const hasSubCompartment = await db.containers.get('cont-kallax-bin1-sub1');
+    if (!hasSubCompartment) {
+      await db.containers.bulkPut(SEED_CONTAINERS);
+      await db.items.bulkPut(SEED_ITEMS);
+    }
   }
 }

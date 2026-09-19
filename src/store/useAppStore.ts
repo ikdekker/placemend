@@ -56,7 +56,7 @@ export interface AppState {
   setSearchQuery: (query: string) => void;
 
   // Jump to specific furniture item (e.g. from search)
-  locateFurniture: (roomId: string, furnitureId: string) => void;
+  locateFurniture: (roomId: string, furnitureId: string, containerId?: string | null) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -93,7 +93,7 @@ export const useAppStore = create<AppState>((set) => ({
       selectedContainerId: null,
       fitViewTrigger: s.fitViewTrigger + 1,
     })),
-  setSelectedFurnitureId: (id) => set({ selectedFurnitureId: id }),
+  setSelectedFurnitureId: (id) => set({ selectedFurnitureId: id, selectedContainerId: null }),
   setSelectedContainerId: (id) => set({ selectedContainerId: id }),
   setHighlightedFurnitureId: (id) => set({ highlightedFurnitureId: id }),
 
@@ -120,10 +120,11 @@ export const useAppStore = create<AppState>((set) => ({
   setBackupModalOpen: (open) => set({ isBackupModalOpen: open }),
   setSearchQuery: (query) => set({ searchQuery: query }),
 
-  locateFurniture: (roomId, furnitureId) => {
+  locateFurniture: (roomId, furnitureId, containerId = null) => {
     set({
       selectedRoomId: roomId,
       selectedFurnitureId: furnitureId,
+      selectedContainerId: containerId,
       highlightedFurnitureId: furnitureId,
       isSearchOpen: false,
     });

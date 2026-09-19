@@ -5,13 +5,29 @@ import path from 'node:path';
 const EDGE_PATH = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
 const USER_DATA_DIR = "C:\\Users\\DESKTO~1\\AppData\\Local\\Temp\\edge_pixel10_profile";
 const TARGET_URL = "http://localhost:5174/placemend/";
-const OUTPUT_PNG = "C:\\Users\\Desktop Home\\.gemini\\antigravity\\brain\\f2366a71-5ca5-418d-b7ed-cd9f02875227\\pixel10_verified.png";
+
+const ARTIFACTS_DIR = "C:\\Users\\Desktop Home\\.gemini\\antigravity\\brain\\f2366a71-5ca5-418d-b7ed-cd9f02875227";
 
 async function wait(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
 async function main() {
+  console.log("Starting preview server on port 5174...");
+  const preview = spawn("cmd.exe", ["/c", "npx", "vite", "preview", "--port", "5174"], {
+    cwd: "C:\\Users\\Desktop Home\\Workspace\\placemend",
+    stdio: 'ignore'
+  });
+
+  for (let i = 0; i < 30; i++) {
+    try {
+      const res = await fetch("http://localhost:5174/placemend/");
+      if (res.ok) break;
+    } catch (e) {
+      await wait(200);
+    }
+  }
+
   console.log("Launching Edge with remote debugging...");
   const edge = spawn(EDGE_PATH, [
     "--headless=new",
@@ -22,7 +38,6 @@ async function main() {
     "about:blank"
   ], { stdio: 'ignore' });
 
-  // Wait for port 9222 to be available
   let version = null;
   for (let i = 0; i < 30; i++) {
     try {
@@ -39,17 +54,13 @@ async function main() {
   if (!version) {
     console.error("Could not connect to Edge on port 9222");
     edge.kill();
+    preview.kill();
     process.exit(1);
   }
 
-  console.log("Connected to browser:", version.Browser);
-
-  // Create new target tab
   const newTabRes = await fetch(`http://127.0.0.1:9222/json/new?${encodeURIComponent(TARGET_URL)}`, { method: 'PUT' });
   const tab = await newTabRes.json();
-  console.log("Opened tab:", tab.id);
 
-  // Connect WebSocket
   const ws = new WebSocket(tab.webSocketDebuggerUrl);
   let id = 1;
   const callbacks = new Map();
@@ -71,18 +82,26 @@ async function main() {
       callbacks.delete(msg.id);
       if (msg.error) reject(msg.error);
       else resolve(msg.result);
-    } else if (msg.method === 'Runtime.consoleAPICalled') {
-      console.log(`[Browser Console ${msg.params.type}]`, ...msg.params.args.map(a => a.value || a.description));
-    } else if (msg.method === 'Runtime.exceptionThrown') {
-      console.error('[Browser Exception]', msg.params.exceptionDetails);
     }
   };
 
   await send("Page.enable");
   await send("Runtime.enable");
 
-  // Emulate Pixel (412 x 915, mobile touch)
-  console.log("Setting emulation: 412x915, mobile: true, dsf: 2.625");
+  // Reset database to ensure new seed with nested compartments loads
+  await send("Runtime.evaluate", {
+    expression: `
+      new Promise((resolve) => {
+        const req = indexedDB.deleteDatabase('PlacemendDB');
+        req.onsuccess = resolve;
+        req.onerror = resolve;
+        req.onblocked = resolve;
+      })
+    `,
+    awaitPromise: true,
+  });
+
+  // Emulate Pixel 10 (412 x 915)
   await send("Emulation.setDeviceMetricsOverride", {
     width: 412,
     height: 915,
@@ -94,57 +113,99 @@ async function main() {
     maxTouchPoints: 5,
   });
 
-  // Navigate to page
-  console.log("Navigating to:", TARGET_URL);
+  // Reload page to seed fresh demo data
   await send("Page.navigate", { url: TARGET_URL });
+  await wait(3000);
 
-  // Wait for loading and Dexie DB seeding
-  console.log("Waiting 3.5s for React, IndexedDB seeding, and auto-fit...");
-  await wait(3500);
+  async function snap(filename) {
+    const ss = await send("Page.captureScreenshot", { format: "png", fromSurface: true });
+    const fullPath = path.join(ARTIFACTS_DIR, filename);
+    fs.writeFileSync(fullPath, Buffer.from(ss.data, 'base64'));
+    console.log("Saved screenshot:", fullPath);
+  }
 
-  // Capture Screenshot 1 (Floor plan centered)
-  console.log("Capturing screenshot 1 (Floor plan)...");
-  const ss1 = await send("Page.captureScreenshot", {
-    format: "png",
-    fromSurface: true,
-  });
-  const buffer1 = Buffer.from(ss1.data, 'base64');
-  fs.writeFileSync(OUTPUT_PNG, buffer1);
-  console.log("Saved screenshot to:", OUTPUT_PNG);
+  // 1. Initial Floor Plan View
+  await snap("01_floor_plan_pixel10.png");
 
-  // Click on furniture to open Inspector
-  console.log("Simulating tap on furniture piece...");
-  const clickResult = await send("Runtime.evaluate", {
+  // 2. Click KALLAX bookshelf
+  console.log("Tapping KALLAX bookshelf...");
+  await send("Runtime.evaluate", {
     expression: `
       (() => {
-        const el = document.querySelector('[data-furniture-id]');
-        if (!el) return 'Element not found';
-        el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-        el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-        return 'Clicked: ' + el.getAttribute('data-furniture-id');
+        const kallax = document.getElementById('furniture-furn-bookshelf-tall');
+        if (kallax) kallax.click();
       })()
     `
   });
-  console.log("Click result:", clickResult.result?.value);
-  await wait(800);
+  await wait(700);
+  await snap("02_kallax_physical_layout.png");
 
-  const INSPECTOR_PNG = "C:\\Users\\Desktop Home\\.gemini\\antigravity\\brain\\f2366a71-5ca5-418d-b7ed-cd9f02875227\\pixel10_inspector.png";
-  console.log("Capturing screenshot 2 (Inspector open)...");
-  const ss2 = await send("Page.captureScreenshot", {
-    format: "png",
-    fromSurface: true,
+  // 3. Click "Bottom Left DRÖNA Box" (has 2 compartments)
+  console.log("Tapping 'Bottom Left DRÖNA Box'...");
+  await send("Runtime.evaluate", {
+    expression: `
+      (() => {
+        const slot = Array.from(document.querySelectorAll('h4')).find(el => el.textContent.includes('DRÖNA Box (Board Games)'));
+        if (slot) slot.closest('div[class*="cursor-pointer"]').click();
+      })()
+    `
   });
-  const buffer2 = Buffer.from(ss2.data, 'base64');
-  fs.writeFileSync(INSPECTOR_PNG, buffer2);
-  console.log("Saved inspector screenshot to:", INSPECTOR_PNG);
+  await wait(700);
+  await snap("03_box_compartments_zoom.png");
+
+  // 4. Click "Big Box Strategy Games" compartment (deepest level)
+  console.log("Tapping 'Big Box Strategy Games' compartment...");
+  await send("Runtime.evaluate", {
+    expression: `
+      (() => {
+        const comp = Array.from(document.querySelectorAll('span')).find(el => el.textContent.includes('Big Box Strategy Games'));
+        if (comp) comp.closest('div[class*="cursor-pointer"]').click();
+      })()
+    `
+  });
+  await wait(700);
+  await snap("04_deepest_level_clean_items.png");
+
+  // 5. Click back to box, back to kallax, and click "Show all items in cupboard"
+  console.log("Testing 'Show all items in cupboard'...");
+  await send("Runtime.evaluate", {
+    expression: `
+      (() => {
+        // Click back twice
+        const backBtn = document.querySelector('button[title="Back up one level"]');
+        if (backBtn) backBtn.click();
+      })()
+    `
+  });
+  await wait(400);
+  await send("Runtime.evaluate", {
+    expression: `
+      (() => {
+        const backBtn = document.querySelector('button[title="Back up one level"]');
+        if (backBtn) backBtn.click();
+      })()
+    `
+  });
+  await wait(400);
+  await send("Runtime.evaluate", {
+    expression: `
+      (() => {
+        const showAllBtn = Array.from(document.querySelectorAll('button')).find(el => el.textContent.includes('Show all items'));
+        if (showAllBtn) showAllBtn.click();
+      })()
+    `
+  });
+  await wait(700);
+  await snap("05_show_all_items_overview.png");
 
   // Cleanup
   ws.close();
   edge.kill();
-  console.log("Done!");
+  preview.kill();
+  console.log("All test steps complete!");
 }
 
 main().catch(err => {
-  console.error("Test failed:", err);
+  console.error("Test execution error:", err);
   process.exit(1);
 });
