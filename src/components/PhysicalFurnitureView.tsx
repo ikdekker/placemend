@@ -18,11 +18,16 @@ import {
   Edit3,
   Camera,
   Image as ImageIcon,
-  Zap
+  Zap,
+  Sliders,
+  ArrowRight,
+  ChevronLeft,
+  ChevronUp,
+  ChevronDown,
+  Check
 } from 'lucide-react';
 
 function cleanContainerName(name: string): string {
-  // Clean off parenthetical comments like "(Cables & Adapters)" for clean visual display
   return name.replace(/\s*\(.*?\)\s*/g, '').trim();
 }
 
@@ -38,7 +43,8 @@ export const PhysicalFurnitureView: React.FC = () => {
 
   const [showAllItems, setShowAllItems] = useState(false);
   const [viewMode, setViewMode] = useState<'model' | 'photo'>('model');
-  const [isAddingSlot, setIsAddingSlot] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
+  const [addingToCol, setAddingToCol] = useState<number | null>(null);
   const [newSlotName, setNewSlotName] = useState('');
   const [newSlotType, setNewSlotType] = useState<Container['type']>('drawer');
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -71,7 +77,167 @@ export const PhysicalFurnitureView: React.FC = () => {
   // Top-level sections (e.g. drawers, boxes, shelves directly belonging to furniture)
   const topLevelContainers = containers.filter((c) => !c.parentContainerId);
 
-  // Handle uploading / capturing real furniture photo
+  // Determine number of columns (1 to 4)
+  const numColumns = Math.max(1, Math.min(4, furniture.columns || 3));
+
+  // Organize containers into columns
+  const columns: Container[][] = Array.from({ length: numColumns }, () => []);
+  topLevelContainers.forEach((container, idx) => {
+    let colIdx = container.columnIndex;
+    if (colIdx === undefined || colIdx < 0 || colIdx >= numColumns) {
+      colIdx = idx % numColumns;
+    }
+    columns[colIdx].push(container);
+  });
+
+  // Sort each column's stack by orderIndex
+  columns.forEach((col) => col.sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0)));
+
+  // Column count updater
+  const handleSetColumns = async (cols: number) => {
+    if (!furniture) return;
+    await db.furniture.update(furniture.id, { columns: cols });
+    // Rebalance any containers that were in out-of-bounds columns
+    for (const c of topLevelContainers) {
+      if ((c.columnIndex ?? 0) >= cols) {
+        await db.containers.update(c.id, { columnIndex: cols - 1 });
+      }
+    }
+  };
+
+  // Reordering handlers for Compose Mode
+  const handleMoveColumn = async (container: Container, delta: number) => {
+    const currentCol = container.columnIndex ?? 0;
+    const newCol = Math.max(0, Math.min(numColumns - 1, currentCol + delta));
+    if (newCol === currentCol) return;
+
+    const targetColContainers = topLevelContainers.filter(c => (c.columnIndex ?? 0) === newCol);
+    await db.containers.update(container.id, {
+      columnIndex: newCol,
+      orderIndex: targetColContainers.length,
+      updatedAt: Date.now(),
+    });
+  };
+
+  const handleMoveStack = async (container: Container, delta: number) => {
+    const colIdx = container.columnIndex ?? 0;
+    const colContainers = topLevelContainers
+      .filter(c => (c.columnIndex ?? 0) === colIdx)
+      .sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+
+    const currentIndex = colContainers.findIndex(c => c.id === container.id);
+    const targetIndex = currentIndex + delta;
+    if (targetIndex < 0 || targetIndex >= colContainers.length) return;
+
+    const otherContainer = colContainers[targetIndex];
+    await db.containers.update(container.id, { orderIndex: otherContainer.orderIndex || 0 });
+    await db.containers.update(otherContainer.id, { orderIndex: container.orderIndex || 0 });
+  };
+
+  const handleDeleteContainer = async (containerId: string) => {
+    await db.containers.delete(containerId);
+    // Delete any subcompartments or items stored inside
+    const childConts = await db.containers.where('parentContainerId').equals(containerId).toArray();
+    for (const child of childConts) {
+      await db.containers.delete(child.id);
+      await db.items.where('containerId').equals(child.id).delete();
+    }
+    await db.items.where('containerId').equals(containerId).delete();
+  };
+
+  // Preset compositions
+  const handleApplyPreset = async (preset: '3_side_by_side' | '2_left_2_mid_1_right' | '2x2_grid' | 'dresser_stack') => {
+    if (!furniture) return;
+
+    if (preset === '3_side_by_side') {
+      await db.furniture.update(furniture.id, { columns: 3 });
+      for (let i = 0; i < topLevelContainers.length; i++) {
+        await db.containers.update(topLevelContainers[i].id, {
+          columnIndex: Math.min(2, i),
+          orderIndex: 0,
+        });
+      }
+    } else if (preset === '2_left_2_mid_1_right') {
+      await db.furniture.update(furniture.id, { columns: 3 });
+      const existing = [...topLevelContainers];
+      const distribution = [
+        { col: 0, order: 0 },
+        { col: 0, order: 1 },
+        { col: 1, order: 0 },
+        { col: 1, order: 1 },
+        { col: 2, order: 0 },
+      ];
+
+      for (let i = 0; i < existing.length && i < distribution.length; i++) {
+        await db.containers.update(existing[i].id, {
+          columnIndex: distribution[i].col,
+          orderIndex: distribution[i].order,
+        });
+      }
+
+      if (existing.length < 5) {
+        for (let i = existing.length; i < 5; i++) {
+          await db.containers.add({
+            id: `cont-${Date.now()}-${i}`,
+            furnitureId: furniture.id,
+            name: `Drawer ${i + 1}`,
+            type: 'drawer',
+            columnIndex: distribution[i].col,
+            orderIndex: distribution[i].order,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          });
+        }
+      }
+    } else if (preset === '2x2_grid') {
+      await db.furniture.update(furniture.id, { columns: 2 });
+      const existing = [...topLevelContainers];
+      const distribution = [
+        { col: 0, order: 0 },
+        { col: 0, order: 1 },
+        { col: 1, order: 0 },
+        { col: 1, order: 1 },
+      ];
+      for (let i = 0; i < existing.length && i < distribution.length; i++) {
+        await db.containers.update(existing[i].id, {
+          columnIndex: distribution[i].col,
+          orderIndex: distribution[i].order,
+        });
+      }
+    } else if (preset === 'dresser_stack') {
+      await db.furniture.update(furniture.id, { columns: 1 });
+      for (let i = 0; i < topLevelContainers.length; i++) {
+        await db.containers.update(topLevelContainers[i].id, {
+          columnIndex: 0,
+          orderIndex: i,
+        });
+      }
+    }
+  };
+
+  // Add slot to specific column
+  const handleAddSlotToColumn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (addingToCol === null) return;
+
+    const colContainers = columns[addingToCol] || [];
+    const newContainer: Container = {
+      id: `cont-${Date.now()}`,
+      furnitureId: furniture.id,
+      name: newSlotName.trim() || `Drawer ${topLevelContainers.length + 1}`,
+      type: newSlotType,
+      columnIndex: addingToCol,
+      orderIndex: colContainers.length,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    await db.containers.add(newContainer);
+    setNewSlotName('');
+    setAddingToCol(null);
+  };
+
+  // Photo handlers
   const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -94,42 +260,8 @@ export const PhysicalFurnitureView: React.FC = () => {
     }
   };
 
-  const handleAddSlot = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newSlotName.trim()) return;
-
-    const newContainer: Container = {
-      id: `cont-${Date.now()}`,
-      furnitureId: furniture.id,
-      name: newSlotName.trim(),
-      type: newSlotType,
-      orderIndex: topLevelContainers.length,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-
-    await db.containers.add(newContainer);
-    setNewSlotName('');
-    setIsAddingSlot(false);
-  };
-
-  // Determine physical facade layout:
-  // 1. Explicit layout if set on furniture
-  // 2. Or 'horizontal_row' if 2-3 drawers and furniture width >= 4 (like console, desk, credenza)
-  // 3. Or 'grid' if 4+ containers or bookshelf
-  // 4. Otherwise 'vertical_stack'
-  const isHorizontalRow =
-    furniture.facadeLayout === 'horizontal_row' ||
-    ((topLevelContainers.length === 2 || topLevelContainers.length === 3) &&
-      (furniture.type === 'cabinet' || furniture.type === 'desk' || furniture.type === 'dresser' || (furniture.dimension?.width || 0) >= 4));
-
-  const isGrid =
-    furniture.facadeLayout === 'grid' ||
-    (!isHorizontalRow && (furniture.type === 'bookshelf' || topLevelContainers.length >= 4));
-
   return (
     <div className="flex-1 min-h-0 w-full bg-slate-100 flex flex-col overflow-hidden animate-in fade-in duration-150">
-      {/* Hidden file input for camera / photo upload */}
       <input
         ref={photoInputRef}
         type="file"
@@ -162,8 +294,24 @@ export const PhysicalFurnitureView: React.FC = () => {
           </div>
         </div>
 
-        {/* Header Actions: Photo Toggle & All Items */}
+        {/* Header Actions: Compose Layout, Photo, & All Items */}
         <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button
+            onClick={() => {
+              setIsComposing(!isComposing);
+              if (showAllItems) setShowAllItems(false);
+            }}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
+              isComposing 
+                ? 'bg-blue-600 text-white shadow-blue-500/20 ring-2 ring-blue-400' 
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+            }`}
+            title="Configure drawer layout and composition"
+          >
+            <Sliders className="w-3.5 h-3.5" />
+            <span>{isComposing ? 'Done' : 'Layout'}</span>
+          </button>
+
           {furniture.photoDataUrl ? (
             <button
               onClick={() => setViewMode(viewMode === 'model' ? 'photo' : 'model')}
@@ -172,25 +320,26 @@ export const PhysicalFurnitureView: React.FC = () => {
                   ? 'bg-purple-600 text-white shadow-purple-500/20' 
                   : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
               }`}
-              title="Toggle between semi-3D visual layout and real furniture photo"
             >
               <Camera className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{viewMode === 'photo' ? '3D View' : 'Real Photo'}</span>
+              <span className="hidden sm:inline">{viewMode === 'photo' ? '3D View' : 'Photo'}</span>
             </button>
           ) : (
             <button
               onClick={() => photoInputRef.current?.click()}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer shadow-xs"
-              title="Take or upload a real photo of this furniture"
+              title="Add a real photo"
             >
               <Camera className="w-3.5 h-3.5 text-blue-600" />
-              <span className="hidden sm:inline">+ Photo</span>
             </button>
           )}
 
           <button
             data-action="toggle-all-items"
-            onClick={() => setShowAllItems(!showAllItems)}
+            onClick={() => {
+              setShowAllItems(!showAllItems);
+              if (isComposing) setIsComposing(false);
+            }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
               showAllItems 
                 ? 'bg-blue-600 text-white shadow-blue-500/20' 
@@ -204,7 +353,7 @@ export const PhysicalFurnitureView: React.FC = () => {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y w-full p-4 sm:p-6 pb-36 sm:pb-16 flex flex-col items-center">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y w-full p-3 sm:p-6 pb-36 sm:pb-16 flex flex-col items-center">
         {showAllItems ? (
           /* Flat All Items List Mode */
           <div className="w-full max-w-2xl flex flex-col gap-2.5">
@@ -267,6 +416,230 @@ export const PhysicalFurnitureView: React.FC = () => {
               })
             )}
           </div>
+        ) : isComposing ? (
+          /* ============================================================ */
+          /* INTERACTIVE LAYOUT COMPOSER (CUSTOM DRAWERS & COLUMNS SETUP) */
+          /* ============================================================ */
+          <div className="w-full max-w-xl flex flex-col gap-4 animate-in fade-in duration-200">
+            {/* Composer Toolbar */}
+            <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-extrabold text-sm text-slate-900">Customize Drawer Setup</h3>
+                  <p className="text-xs text-slate-500">Configure columns and stack drawers in any layout</p>
+                </div>
+                <button
+                  onClick={() => setIsComposing(false)}
+                  className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-sm cursor-pointer"
+                >
+                  Done
+                </button>
+              </div>
+
+              {/* Column Count Buttons */}
+              <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                <span className="text-xs font-bold text-slate-600">Columns:</span>
+                <div className="flex items-center gap-1.5">
+                  {[1, 2, 3, 4].map((cols) => (
+                    <button
+                      key={cols}
+                      onClick={() => handleSetColumns(cols)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                        numColumns === cols
+                          ? 'bg-slate-900 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      {cols} {cols === 1 ? 'Column' : 'Cols'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Quick Presets */}
+              <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-100">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Quick Presets:</span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                  <button
+                    onClick={() => handleApplyPreset('3_side_by_side')}
+                    className="p-2 rounded-xl bg-slate-50 hover:bg-blue-50 hover:text-blue-600 text-slate-700 border border-slate-200 text-[11px] font-bold text-center cursor-pointer transition-all"
+                  >
+                    3 Side-by-Side
+                  </button>
+                  <button
+                    onClick={() => handleApplyPreset('2_left_2_mid_1_right')}
+                    className="p-2 rounded-xl bg-amber-50/80 hover:bg-amber-100 text-amber-900 border border-amber-300 text-[11px] font-black text-center cursor-pointer transition-all shadow-xs"
+                    title="2 stacked on left, 2 stacked in middle, 1 on right"
+                  >
+                    2 Left, 2 Mid, 1 Right
+                  </button>
+                  <button
+                    onClick={() => handleApplyPreset('2x2_grid')}
+                    className="p-2 rounded-xl bg-slate-50 hover:bg-blue-50 hover:text-blue-600 text-slate-700 border border-slate-200 text-[11px] font-bold text-center cursor-pointer transition-all"
+                  >
+                    2x2 Grid
+                  </button>
+                  <button
+                    onClick={() => handleApplyPreset('dresser_stack')}
+                    className="p-2 rounded-xl bg-slate-50 hover:bg-blue-50 hover:text-blue-600 text-slate-700 border border-slate-200 text-[11px] font-bold text-center cursor-pointer transition-all"
+                  >
+                    Dresser Stack
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Interactive Columns Canvas */}
+            <div className="w-full flex flex-col gap-2">
+              <div 
+                className="grid gap-2.5 sm:gap-3 w-full"
+                style={{ gridTemplateColumns: `repeat(${numColumns}, minmax(0, 1fr))` }}
+              >
+                {columns.map((colContainers, colIdx) => (
+                  <div 
+                    key={colIdx} 
+                    className="bg-white/80 backdrop-blur-xs rounded-2xl p-2.5 border-2 border-slate-300/80 shadow-sm flex flex-col gap-2 min-h-[180px]"
+                  >
+                    <div className="flex items-center justify-between pb-1 border-b border-slate-200/60">
+                      <span className="text-[11px] font-black uppercase tracking-wider text-slate-600">
+                        {numColumns === 3 
+                          ? (colIdx === 0 ? 'Left' : colIdx === 1 ? 'Middle' : 'Right')
+                          : `Col ${colIdx + 1}`}
+                      </span>
+                      <span className="text-[10px] font-bold text-slate-400">
+                        {colContainers.length} {colContainers.length === 1 ? 'slot' : 'slots'}
+                      </span>
+                    </div>
+
+                    {/* Containers Stacked in this column */}
+                    <div className="flex flex-col gap-2 flex-1">
+                      {colContainers.map((container, itemIdx) => (
+                        <div
+                          key={container.id}
+                          className="p-2 rounded-xl bg-slate-50 border border-slate-200 shadow-xs flex flex-col gap-1.5 text-xs"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-extrabold text-slate-800 truncate text-[11px]">
+                              {container.name}
+                            </span>
+                            <button
+                              onClick={() => handleDeleteContainer(container.id)}
+                              className="text-slate-400 hover:text-rose-600 p-0.5 cursor-pointer"
+                              title="Delete drawer"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+
+                          {/* Reordering Controls */}
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-200/60">
+                            {/* Column Move (Left / Right) */}
+                            <div className="flex items-center gap-1">
+                              <button
+                                disabled={colIdx === 0}
+                                onClick={() => handleMoveColumn(container, -1)}
+                                className={`p-1 rounded-md text-[10px] font-bold ${
+                                  colIdx > 0 
+                                    ? 'bg-white border border-slate-300 text-slate-700 hover:bg-blue-50 cursor-pointer' 
+                                    : 'opacity-20 cursor-not-allowed'
+                                }`}
+                                title="Move left to previous column"
+                              >
+                                ◀
+                              </button>
+                              <button
+                                disabled={colIdx === numColumns - 1}
+                                onClick={() => handleMoveColumn(container, 1)}
+                                className={`p-1 rounded-md text-[10px] font-bold ${
+                                  colIdx < numColumns - 1 
+                                    ? 'bg-white border border-slate-300 text-slate-700 hover:bg-blue-50 cursor-pointer' 
+                                    : 'opacity-20 cursor-not-allowed'
+                                }`}
+                                title="Move right to next column"
+                              >
+                                ▶
+                              </button>
+                            </div>
+
+                            {/* Stack Move (Up / Down) */}
+                            <div className="flex items-center gap-1">
+                              <button
+                                disabled={itemIdx === 0}
+                                onClick={() => handleMoveStack(container, -1)}
+                                className={`p-1 rounded-md text-[10px] font-bold ${
+                                  itemIdx > 0 
+                                    ? 'bg-white border border-slate-300 text-slate-700 hover:bg-blue-50 cursor-pointer' 
+                                    : 'opacity-20 cursor-not-allowed'
+                                }`}
+                                title="Move up in stack"
+                              >
+                                ▲
+                              </button>
+                              <button
+                                disabled={itemIdx === colContainers.length - 1}
+                                onClick={() => handleMoveStack(container, 1)}
+                                className={`p-1 rounded-md text-[10px] font-bold ${
+                                  itemIdx < colContainers.length - 1 
+                                    ? 'bg-white border border-slate-300 text-slate-700 hover:bg-blue-50 cursor-pointer' 
+                                    : 'opacity-20 cursor-not-allowed'
+                                }`}
+                                title="Move down in stack"
+                              >
+                                ▼
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+
+                      {colContainers.length === 0 && (
+                        <div className="flex-1 flex items-center justify-center text-center p-3 text-slate-400 text-[11px] font-medium border-2 border-dashed border-slate-200 rounded-xl">
+                          No drawers
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Column Specific Add Drawer Button */}
+                    {addingToCol === colIdx ? (
+                      <form onSubmit={handleAddSlotToColumn} className="flex flex-col gap-1.5 p-2 bg-blue-50 rounded-xl border border-blue-200">
+                        <input
+                          type="text"
+                          placeholder="Drawer name..."
+                          value={newSlotName}
+                          onChange={(e) => setNewSlotName(e.target.value)}
+                          autoFocus
+                          className="w-full px-2 py-1 text-xs rounded-lg border border-blue-300 bg-white"
+                        />
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="submit"
+                            className="flex-1 py-1 bg-blue-600 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                          >
+                            Add
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setAddingToCol(null)}
+                            className="px-2 py-1 bg-slate-200 text-slate-600 rounded-lg text-[10px] font-bold cursor-pointer"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <button
+                        onClick={() => setAddingToCol(colIdx)}
+                        className="w-full py-1.5 rounded-xl border border-dashed border-slate-300 hover:border-blue-400 hover:bg-blue-50/60 text-slate-600 hover:text-blue-600 text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-all"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Add</span>
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         ) : viewMode === 'photo' && furniture.photoDataUrl ? (
           /* Real-World Furniture Photo Mode */
           <div className="w-full max-w-xl flex flex-col items-center gap-4">
@@ -297,52 +670,55 @@ export const PhysicalFurnitureView: React.FC = () => {
             {/* Quick Drawer Selectors under Photo */}
             <div className="w-full flex flex-col gap-2">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-500 text-center">
-                Tap a drawer or compartment to open
+                Tap a drawer to open
               </span>
-              <div className={isHorizontalRow ? 'grid grid-cols-3 gap-2.5' : isGrid ? 'grid grid-cols-2 sm:grid-cols-4 gap-2.5' : 'flex flex-col gap-2'}>
-                {topLevelContainers.map((container) => {
-                  const directCount = itemCountMap.get(container.id) || 0;
-                  const children = containers.filter((c) => c.parentContainerId === container.id);
-                  const childCount = children.reduce((acc, c) => acc + (itemCountMap.get(c.id) || 0), 0);
-                  const totalCount = directCount + childCount;
-                  const isMatch = isSearching && matchingContainerIds.has(container.id);
-                  const matchCount = matchCountsByContainer.get(container.id) || 0;
+              <div 
+                className="grid gap-2.5 w-full"
+                style={{ gridTemplateColumns: `repeat(${numColumns}, minmax(0, 1fr))` }}
+              >
+                {columns.map((colContainers, colIdx) => (
+                  <div key={colIdx} className="flex flex-col gap-2">
+                    {colContainers.map((container) => {
+                      const directCount = itemCountMap.get(container.id) || 0;
+                      const children = containers.filter((c) => c.parentContainerId === container.id);
+                      const childCount = children.reduce((acc, c) => acc + (itemCountMap.get(c.id) || 0), 0);
+                      const totalCount = directCount + childCount;
+                      const isMatch = isSearching && matchingContainerIds.has(container.id);
+                      const matchCount = matchCountsByContainer.get(container.id) || 0;
 
-                  return (
-                    <button
-                      key={container.id}
-                      onClick={() => setSelectedContainerId(container.id)}
-                      className={`p-3 rounded-2xl border-2 font-extrabold text-xs transition-all flex flex-col items-center gap-1 shadow-sm active:scale-95 cursor-pointer ${
-                        isMatch 
-                          ? 'bg-amber-500 text-white border-amber-500 shadow-md ring-2 ring-amber-300' 
-                          : 'bg-white text-slate-800 border-slate-200 hover:border-blue-500 hover:shadow-md'
-                      }`}
-                    >
-                      <span className="truncate w-full text-center">{cleanContainerName(container.name)}</span>
-                      {isMatch ? (
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-600 text-white font-black">
-                          ⚡ {matchCount} {matchCount === 1 ? 'match' : 'matches'}
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-bold">
-                          {totalCount} {totalCount === 1 ? 'item' : 'items'}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
+                      return (
+                        <button
+                          key={container.id}
+                          onClick={() => setSelectedContainerId(container.id)}
+                          className={`p-3 rounded-2xl border-2 font-extrabold text-xs transition-all flex flex-col items-center gap-1 shadow-sm active:scale-95 cursor-pointer ${
+                            isMatch 
+                              ? 'bg-amber-500 text-white border-amber-500 shadow-md ring-2 ring-amber-300' 
+                              : 'bg-white text-slate-800 border-slate-200 hover:border-blue-500 hover:shadow-md'
+                          }`}
+                        >
+                          <span className="truncate w-full text-center">{cleanContainerName(container.name)}</span>
+                          {isMatch ? (
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-600 text-white font-black">
+                              ⚡ {matchCount}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-bold">
+                              {totalCount}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
             </div>
           </div>
         ) : (
-          /* Semi-3D Physical Furniture Facade */
+          /* ============================================================ */
+          /* PURE VISUAL SEMI-3D FURNITURE FACADE (ZERO TEXT ON DRAWERS)  */
+          /* ============================================================ */
           <div className="w-full max-w-xl flex flex-col items-center gap-4 sm:gap-5">
-            <div className="text-center">
-              <span className="text-xs font-bold uppercase tracking-widest text-slate-400">
-                Tap a drawer or compartment to open
-              </span>
-            </div>
-
             {/* Realistic Semi-3D Furniture Shell */}
             <div className="w-full flex flex-col items-center">
               {/* Top Crown / Tabletop Slab (Realistic Bevel & Sheen) */}
@@ -350,7 +726,6 @@ export const PhysicalFurnitureView: React.FC = () => {
                 style={{ backgroundColor: furniture.color || '#0f766e' }}
                 className="w-[99%] h-4 sm:h-5 rounded-t-2xl shadow-sm border-t border-x border-white/40 relative overflow-hidden flex items-center justify-center"
               >
-                {/* Light reflection sheen on top ledge */}
                 <div className="absolute inset-x-0 top-0 h-[2px] bg-white/50" />
                 <div className="w-16 h-1 rounded-full bg-white/20" />
               </div>
@@ -370,176 +745,97 @@ export const PhysicalFurnitureView: React.FC = () => {
                       This cupboard doesn't have any drawers or shelves yet.
                     </p>
                     <button
-                      onClick={() => setIsAddingSlot(true)}
+                      onClick={() => setIsComposing(true)}
                       className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold text-xs shadow-md"
                     >
-                      + Add First Drawer / Shelf
+                      Configure Layout
                     </button>
                   </div>
                 ) : (
-                  /* Spatial Layout: Side-by-Side Horizontal Row for Consoles, Grid for Shelves */
-                  <div className={
-                    isHorizontalRow
-                      ? 'grid grid-cols-3 gap-2 sm:gap-3.5'
-                      : isGrid
-                      ? 'grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3.5'
-                      : 'flex flex-col gap-3'
-                  }>
-                    {topLevelContainers.map((container) => {
-                      const directCount = itemCountMap.get(container.id) || 0;
-                      const children = containers.filter((c) => c.parentContainerId === container.id);
-                      const childCount = children.reduce((acc, c) => acc + (itemCountMap.get(c.id) || 0), 0);
-                      const totalCount = directCount + childCount;
+                  /* Multi-Column Multi-Stack Layout */
+                  <div 
+                    className="grid gap-2 sm:gap-3.5 w-full"
+                    style={{ gridTemplateColumns: `repeat(${numColumns}, minmax(0, 1fr))` }}
+                  >
+                    {columns.map((colContainers, colIdx) => (
+                      <div key={colIdx} className="flex flex-col gap-2 sm:gap-3 h-full justify-start">
+                        {colContainers.length === 0 ? (
+                          <div className="flex-1 min-h-[110px] rounded-2xl border-2 border-dashed border-slate-300/60 bg-slate-50/40 flex items-center justify-center p-3 text-slate-300 text-xs font-bold pointer-events-none">
+                            Empty
+                          </div>
+                        ) : (
+                          colContainers.map((container) => {
+                            const directCount = itemCountMap.get(container.id) || 0;
+                            const children = containers.filter((c) => c.parentContainerId === container.id);
+                            const childCount = children.reduce((acc, c) => acc + (itemCountMap.get(c.id) || 0), 0);
+                            const totalCount = directCount + childCount;
 
-                      const isMatch = isSearching && matchingContainerIds.has(container.id);
-                      const isDimmed = isSearching && !isMatch;
-                      const matchCount = matchCountsByContainer.get(container.id) || 0;
+                            const isMatch = isSearching && matchingContainerIds.has(container.id);
+                            const isDimmed = isSearching && !isMatch;
+                            const matchCount = matchCountsByContainer.get(container.id) || 0;
 
-                      const isDrawer = container.type === 'drawer';
-                      const isBox = container.type === 'box' || container.type === 'bin';
+                            const isDrawer = container.type === 'drawer';
+                            const isBox = container.type === 'box' || container.type === 'bin';
 
-                      // Render Tactile Horizontal Drawer Face
-                      if (isHorizontalRow) {
-                        return (
-                          <div
-                            key={container.id}
-                            onClick={() => setSelectedContainerId(container.id)}
-                            className={`relative rounded-2xl p-2.5 sm:p-4 flex flex-col justify-between items-center text-center cursor-pointer transition-all duration-200 group active:scale-95 min-h-[120px] sm:min-h-[145px] select-none ${
-                              isMatch
-                                ? 'ring-4 ring-amber-400 bg-amber-50/95 border-2 border-amber-400 shadow-xl shadow-amber-300/50 scale-[1.02] z-10'
-                                : isDrawer
-                                ? 'bg-gradient-to-b from-white via-slate-50 to-slate-100 border-2 border-slate-300 hover:border-blue-500 shadow-md hover:shadow-xl'
-                                : isBox
-                                ? 'bg-gradient-to-b from-amber-50 via-amber-100/60 to-amber-100/90 border-2 border-amber-300 hover:border-amber-500 shadow-md hover:shadow-xl'
-                                : 'bg-white border-2 border-slate-200 hover:border-emerald-500 shadow-md hover:shadow-xl'
-                            } ${isDimmed ? 'opacity-30 grayscale-[30%]' : 'opacity-100'}`}
-                          >
-                            {/* Drawer Top Row: Corner screw & Unique Item Count Badge */}
-                            <div className="w-full flex items-center justify-between pointer-events-none">
-                              <div className={`w-2 h-2 rounded-full transition-colors ${
-                                isMatch ? 'bg-amber-400' : 'bg-slate-300 group-hover:bg-blue-400'
-                              }`} />
-                              {isMatch ? (
-                                <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white font-extrabold text-[10px] shadow-xs flex items-center gap-1 animate-pulse">
-                                  <span>⚡</span>
-                                  <span>{matchCount} {matchCount === 1 ? 'match' : 'matches'}</span>
-                                </span>
-                              ) : totalCount > 0 ? (
-                                <span className="px-2 py-0.5 rounded-full bg-slate-900 text-white font-mono text-[10px] sm:text-xs font-black shadow-xs">
-                                  {totalCount}
-                                </span>
-                              ) : (
-                                <span className="text-[10px] text-slate-400 font-semibold">
-                                  Empty
-                                </span>
-                              )}
-                            </div>
-
-                            {/* Centered Tactile Metallic Pull-Handle */}
-                            <div className="my-auto py-2 flex flex-col items-center pointer-events-none">
-                              {isDrawer ? (
-                                <div className="flex flex-col items-center gap-1">
-                                  <div className={`w-11 sm:w-16 h-2 rounded-full transition-all duration-200 shadow-inner border ${
-                                    isMatch 
-                                      ? 'bg-gradient-to-r from-amber-400 via-amber-200 to-amber-400 border-amber-400 shadow-amber-300/50' 
-                                      : 'bg-gradient-to-r from-slate-300 via-slate-100 to-slate-300 border-slate-300 group-hover:from-blue-300 group-hover:to-blue-400'
+                            /* PURE VISUAL DRAWER FRONT: ZERO TEXT LABELS */
+                            return (
+                              <div
+                                key={container.id}
+                                onClick={() => setSelectedContainerId(container.id)}
+                                className={`relative rounded-2xl p-2.5 sm:p-3.5 flex flex-col justify-between items-center text-center cursor-pointer transition-all duration-200 group active:scale-95 min-h-[90px] sm:min-h-[115px] select-none ${
+                                  isMatch
+                                    ? 'ring-4 ring-amber-400 bg-amber-50/95 border-2 border-amber-400 shadow-xl shadow-amber-300/50 scale-[1.02] z-10'
+                                    : isDrawer
+                                    ? 'bg-gradient-to-b from-white via-slate-50 to-slate-100 border-2 border-slate-300 hover:border-blue-500 shadow-md hover:shadow-xl'
+                                    : isBox
+                                    ? 'bg-gradient-to-b from-amber-50 via-amber-100/60 to-amber-100/90 border-2 border-amber-300 hover:border-amber-500 shadow-md hover:shadow-xl'
+                                    : 'bg-white border-2 border-slate-200 hover:border-emerald-500 shadow-md hover:shadow-xl'
+                                } ${isDimmed ? 'opacity-30 grayscale-[30%]' : 'opacity-100'}`}
+                              >
+                                {/* Top Pip Row: Subtle corner screw + Minimal Count Pip */}
+                                <div className="w-full flex items-center justify-between pointer-events-none">
+                                  <div className={`w-1.5 h-1.5 rounded-full transition-colors ${
+                                    isMatch ? 'bg-amber-400' : 'bg-slate-300 group-hover:bg-blue-400'
                                   }`} />
+                                  {isMatch ? (
+                                    <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white font-extrabold text-[10px] shadow-xs flex items-center gap-1 animate-pulse">
+                                      <span>⚡</span>
+                                      <span>{matchCount}</span>
+                                    </span>
+                                  ) : totalCount > 0 ? (
+                                    <span className="px-2 py-0.5 rounded-full bg-slate-900 text-white font-mono text-[10px] sm:text-xs font-black shadow-xs">
+                                      {totalCount}
+                                    </span>
+                                  ) : (
+                                    <div className="w-1.5 h-1.5 rounded-full bg-slate-200" />
+                                  )}
                                 </div>
-                              ) : isBox ? (
-                                <div className="w-8 h-2 rounded-md bg-amber-800/40 shadow-xs" />
-                              ) : (
-                                <div className="w-6 h-1 rounded-full bg-slate-300" />
-                              )}
-                            </div>
 
-                            {/* Clean Spatial Label (Zero parenthetical noise) */}
-                            <div className="w-full pointer-events-none">
-                              <h3 className={`font-extrabold text-xs sm:text-sm tracking-tight truncate ${
-                                isMatch ? 'text-amber-950 font-black' : 'text-slate-800 group-hover:text-blue-600'
-                              }`}>
-                                {cleanContainerName(container.name)}
-                              </h3>
-                            </div>
-                          </div>
-                        );
-                      }
-
-                      // Render Cubby / Grid / Stacked Drawer Face
-                      return (
-                        <div
-                          key={container.id}
-                          onClick={() => setSelectedContainerId(container.id)}
-                          className={`relative rounded-2xl p-3.5 sm:p-4 transition-all duration-200 cursor-pointer shadow-md flex items-center justify-between group active:scale-[0.99] select-none ${
-                            isMatch
-                              ? 'ring-3 ring-amber-400 bg-amber-50/95 shadow-xl shadow-amber-300/40 border-2 border-amber-400 scale-[1.01]'
-                              : isDrawer
-                              ? 'bg-gradient-to-b from-white to-slate-50 border-2 border-slate-300 hover:border-blue-500 hover:shadow-xl'
-                              : isBox
-                              ? 'bg-gradient-to-b from-amber-50 to-amber-100/70 border-2 border-amber-300 hover:border-amber-500 hover:shadow-xl'
-                              : 'bg-white border-2 border-slate-200 hover:border-emerald-500 hover:shadow-xl'
-                          } ${isDimmed ? 'opacity-30 grayscale-[30%]' : 'opacity-100'}`}
-                        >
-                          {/* Tactile Drawer Handle (if drawer) */}
-                          {isDrawer && (
-                            <div className="absolute top-1.5 inset-x-0 flex justify-center pointer-events-none">
-                              <div className={`w-14 h-1.5 rounded-full transition-colors shadow-inner ${
-                                isMatch ? 'bg-amber-400' : 'bg-slate-300 group-hover:bg-blue-400'
-                              }`} />
-                            </div>
-                          )}
-
-                          {/* Clean Name without parenthetical comments */}
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className={`p-2.5 rounded-xl transition-colors flex-shrink-0 ${
-                              isMatch ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 group-hover:bg-blue-50'
-                            }`}>
-                              {isDrawer ? (
-                                <Archive className="w-5 h-5 text-blue-600" />
-                              ) : isBox ? (
-                                <Box className="w-5 h-5 text-amber-600" />
-                              ) : (
-                                <Layers className="w-5 h-5 text-emerald-600" />
-                              )}
-                            </div>
-                            <div className="truncate min-w-0">
-                              <h3 className={`font-extrabold text-sm sm:text-base transition-colors truncate ${
-                                isMatch ? 'text-amber-950 font-black' : 'text-slate-800 group-hover:text-blue-600'
-                              }`}>
-                                {cleanContainerName(container.name)}
-                              </h3>
-                              {children.length > 0 && (
-                                <div className="text-[11px] font-semibold text-slate-400">
-                                  {children.length} compartments inside
+                                {/* Tactile Center Metallic Pull-Handle (Zero text anywhere) */}
+                                <div className="my-auto py-2 flex flex-col items-center pointer-events-none">
+                                  {isDrawer ? (
+                                    <div className={`w-10 sm:w-16 h-2 rounded-full transition-all duration-200 shadow-inner border ${
+                                      isMatch 
+                                        ? 'bg-gradient-to-r from-amber-400 via-amber-200 to-amber-400 border-amber-400 shadow-amber-300/50' 
+                                        : 'bg-gradient-to-r from-slate-300 via-slate-100 to-slate-300 border-slate-300 group-hover:from-blue-300 group-hover:to-blue-400'
+                                    }`} />
+                                  ) : isBox ? (
+                                    <div className="w-8 h-2 rounded-md bg-amber-800/40 shadow-xs" />
+                                  ) : (
+                                    <div className="w-6 h-1 rounded-full bg-slate-300" />
+                                  )}
                                 </div>
-                              )}
-                            </div>
-                          </div>
 
-                          {/* Unique Items Count Badge & Chevron */}
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            {isMatch ? (
-                              <span className="px-2.5 py-1 rounded-full bg-amber-500 text-white font-extrabold text-xs shadow-xs flex items-center gap-1 animate-pulse">
-                                <span>⚡</span>
-                                <span>{matchCount} {matchCount === 1 ? 'match' : 'matches'}</span>
-                              </span>
-                            ) : totalCount > 0 ? (
-                              <span className="px-2.5 py-1 rounded-full bg-slate-900 text-white font-mono text-xs font-black shadow-xs">
-                                {totalCount} {totalCount === 1 ? 'item' : 'items'}
-                              </span>
-                            ) : (
-                              <span className="px-2 py-0.5 rounded-full bg-slate-200/80 text-slate-500 text-[11px] font-bold">
-                                Empty
-                              </span>
-                            )}
-                            <div className={`w-7 h-7 rounded-xl flex items-center justify-center transition-all ${
-                              isMatch ? 'bg-amber-500 text-white' : 'bg-slate-100 group-hover:bg-blue-600 group-hover:text-white text-slate-400'
-                            }`}>
-                              <ChevronRight className="w-4 h-4 stroke-[2.5]" />
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                                {/* Bottom Accent Screw */}
+                                <div className="w-full flex justify-center pointer-events-none opacity-40">
+                                  <div className="w-1 h-1 rounded-full bg-slate-300" />
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -559,64 +855,6 @@ export const PhysicalFurnitureView: React.FC = () => {
               {/* Ambient Ground Shadow */}
               <div className="w-[90%] h-2 bg-slate-900/10 rounded-full blur-xs -mt-1" />
             </div>
-
-            {/* Add Section Action Button */}
-            {!isAddingSlot ? (
-              <button
-                onClick={() => setIsAddingSlot(true)}
-                className="flex items-center gap-1.5 text-xs font-bold px-4 py-2.5 rounded-2xl bg-white border border-slate-300 text-slate-700 hover:text-blue-600 hover:border-blue-400 shadow-xs transition-all cursor-pointer"
-              >
-                <Plus className="w-4 h-4 text-blue-600 stroke-[2.5]" />
-                <span>Add Drawer / Shelf / Box</span>
-              </button>
-            ) : (
-              <form
-                onSubmit={handleAddSlot}
-                className="w-full bg-white rounded-2xl p-4 border border-slate-300 shadow-lg flex flex-col gap-3"
-              >
-                <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-xs uppercase tracking-wider text-slate-600">
-                    Add New Storage Slot
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={() => setIsAddingSlot(false)}
-                    className="text-slate-400 hover:text-slate-600 text-xs font-bold cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                </div>
-
-                <input
-                  type="text"
-                  placeholder="e.g. Top Drawer, Middle Shelf, Tool Box..."
-                  value={newSlotName}
-                  onChange={(e) => setNewSlotName(e.target.value)}
-                  autoFocus
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-semibold text-slate-800"
-                />
-
-                <div className="flex items-center gap-2">
-                  <select
-                    value={newSlotType}
-                    onChange={(e) => setNewSlotType(e.target.value as any)}
-                    className="flex-1 px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold text-slate-700 bg-slate-50 focus:outline-none"
-                  >
-                    <option value="drawer">Drawer (Pull-out)</option>
-                    <option value="shelf">Shelf (Open)</option>
-                    <option value="box">Box / Bin</option>
-                    <option value="compartment">Compartment</option>
-                  </select>
-
-                  <button
-                    type="submit"
-                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md cursor-pointer transition-all"
-                  >
-                    Save
-                  </button>
-                </div>
-              </form>
-            )}
           </div>
         )}
       </div>

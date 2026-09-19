@@ -66,6 +66,7 @@ export type Furniture = {
   notes?: string;
   photoDataUrl?: string;
   facadeLayout?: 'horizontal_row' | 'grid' | 'vertical_stack';
+  columns?: number;
   createdAt: number;
   updatedAt: number;
 };
@@ -89,6 +90,7 @@ export type Container = {
   type: ContainerType;
   color?: string;
   orderIndex: number;
+  columnIndex?: number;
   notes?: string;
   createdAt: number;
   updatedAt: number;
