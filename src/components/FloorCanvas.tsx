@@ -18,7 +18,7 @@ import {
   FlipHorizontal,
   FlipVertical
 } from 'lucide-react';
-import { rotateRoom90Clockwise, mirrorRoom, getDoorSvgGeometry, nudgeDoor, getRoomDoors } from '../utils/roomGeometry';
+import { rotateRoom90Clockwise, mirrorRoom, getDoorSvgGeometry, nudgeDoor, getRoomDoors, snapFurniturePosition, getRoomWallSegments } from '../utils/roomGeometry';
 
 export const FloorCanvas: React.FC = () => {
   const {
@@ -134,7 +134,7 @@ export const FloorCanvas: React.FC = () => {
     const effectiveDoor = { ...d, offset: effectiveOffset };
     return {
       door: effectiveDoor,
-      geo: getDoorSvgGeometry(effectiveDoor, gridW, gridH, unitSize),
+      geo: getDoorSvgGeometry(effectiveDoor, gridW, gridH, unitSize, room?.polygonPoints),
     };
   });
 
@@ -250,50 +250,65 @@ export const FloorCanvas: React.FC = () => {
       return;
     }
 
-    // Moving door in Edit Mode
+    // Moving door in Edit Mode (supports slanted segments and axis-aligned walls)
     if (draggingDoorId && appMode === 'edit' && room) {
       const curDoor = roomDoors.find((d) => d.id === draggingDoorId);
       if (curDoor) {
-        const isHorizontal = curDoor.wall === 'top' || curDoor.wall === 'bottom';
-        const deltaPx = isHorizontal ? (clientX - doorDragStart.mouseX) : (clientY - doorDragStart.mouseY);
-        const deltaUnits = deltaPx / (unitSize * zoom);
+        const segments = getRoomWallSegments(room);
+        let seg = curDoor.segmentIndex !== undefined ? segments[curDoor.segmentIndex] : undefined;
+        if (!seg) {
+          seg = segments.find((s) => s.id === curDoor.wall || s.wallSide === curDoor.wall) || segments[0];
+        }
+        const dx = clientX - doorDragStart.mouseX;
+        const dy = clientY - doorDragStart.mouseY;
+        const segDx = seg.p2.x - seg.p1.x;
+        const segDy = seg.p2.y - seg.p1.y;
+        const segLen = Math.hypot(segDx, segDy);
+        const ux = segLen > 0 ? segDx / segLen : 1;
+        const uy = segLen > 0 ? segDy / segLen : 0;
+        const projPx = dx * ux + dy * uy;
+        const deltaUnits = projPx / (unitSize * zoom);
         let newOffset = doorDragStart.origOffset + deltaUnits;
         if (gridSnap) {
           newOffset = Math.round(newOffset);
         }
         const widthUnits = curDoor.width || 2;
-        const maxOffset = isHorizontal ? Math.max(0, gridW - widthUnits) : Math.max(0, gridH - widthUnits);
+        const maxOffset = Math.max(0, seg.length - widthUnits);
         newOffset = Math.max(0, Math.min(maxOffset, newOffset));
         setDoorLiveOffset(newOffset);
       }
       return;
     }
 
-    // Moving furniture in Edit Mode
+    // Moving furniture in Edit Mode (magnetic flush wall snap & polygon boundary clamping)
     if (draggingFurnitureId && appMode === 'edit') {
       const dx = (clientX - dragStartPos.mouseX) / (unitSize * zoom);
       const dy = (clientY - dragStartPos.mouseY) / (unitSize * zoom);
 
-      let newX = dragStartPos.origX + dx;
-      let newY = dragStartPos.origY + dy;
-
-      if (gridSnap) {
-        newX = Math.round(newX);
-        newY = Math.round(newY);
-      }
+      const targetX = dragStartPos.origX + dx;
+      const targetY = dragStartPos.origY + dy;
 
       const furn = furnitureList.find((f) => f.id === draggingFurnitureId);
       if (furn) {
-        const isRot = furn.position.rotation % 180 !== 0;
+        const isRot = (furn.position.rotation || 0) % 180 !== 0;
         const w = isRot ? furn.dimension.length : furn.dimension.width;
         const l = isRot ? furn.dimension.width : furn.dimension.length;
-        newX = Math.max(0, Math.min(gridW - w, newX));
-        newY = Math.max(0, Math.min(gridH - l, newY));
+
+        const snapped = snapFurniturePosition(
+          targetX,
+          targetY,
+          w,
+          l,
+          gridW,
+          gridH,
+          room?.polygonPoints,
+          gridSnap
+        );
 
         setDragLivePos({
           id: draggingFurnitureId,
-          x: newX,
-          y: newY,
+          x: snapped.x,
+          y: snapped.y,
         });
       }
       return;
@@ -687,7 +702,10 @@ export const FloorCanvas: React.FC = () => {
           className="relative rounded-2xl shadow-2xl canvas-bg"
         >
           {/* SVG Floor Material & Architectural Walls */}
-          <svg className="absolute inset-0 w-full h-full pointer-events-none rounded-2xl overflow-hidden">
+          <svg
+            className="absolute inset-0 w-full h-full pointer-events-none"
+            style={{ overflow: 'visible' }}
+          >
             <defs>
               {/* Scandinavian Light Oak Parquet Pattern */}
               <pattern
@@ -714,17 +732,60 @@ export const FloorCanvas: React.FC = () => {
               </filter>
             </defs>
 
-            {/* Main Floor Surface with Warm Parquet */}
+            {/* 1. Architectural Exterior Wall Boundary (drawn first so outer half extends outward) */}
+            {polygonStr ? (
+              <polygon
+                points={polygonStr}
+                fill="none"
+                stroke="#1e293b"
+                strokeWidth="12"
+                strokeLinejoin="round"
+              />
+            ) : (
+              <rect
+                x="0"
+                y="0"
+                width={roomPixelW}
+                height={roomPixelH}
+                fill="none"
+                stroke="#1e293b"
+                strokeWidth="12"
+                strokeLinejoin="round"
+              />
+            )}
+
+            {/* 2. Main Floor Surface with Warm Parquet (covers the inner 6px of the wall stroke, flush with grid (0,0)) */}
             {polygonStr ? (
               <polygon
                 points={polygonStr}
                 fill="url(#wood-parquet)"
               />
             ) : (
-              <rect width="100%" height="100%" fill="url(#wood-parquet)" />
+              <rect x="0" y="0" width={roomPixelW} height={roomPixelH} fill="url(#wood-parquet)" />
             )}
 
-            {/* Architectural Grid (Subtle Guide) */}
+            {/* 3. Inner Plaster Bevel Stroke (flush along inner boundary) */}
+            {polygonStr ? (
+              <polygon
+                points={polygonStr}
+                fill="none"
+                stroke="#94a3b8"
+                strokeWidth="1.5"
+                strokeLinejoin="round"
+              />
+            ) : (
+              <rect
+                x="0"
+                y="0"
+                width={roomPixelW}
+                height={roomPixelH}
+                fill="none"
+                stroke="#94a3b8"
+                strokeWidth="1.5"
+              />
+            )}
+
+            {/* 4. Architectural Grid (Subtle Guide) */}
             <pattern
               id="subtle-grid"
               width={unitSize}
@@ -739,9 +800,13 @@ export const FloorCanvas: React.FC = () => {
                 opacity="0.4"
               />
             </pattern>
-            <rect width="100%" height="100%" fill="url(#subtle-grid)" />
+            {polygonStr ? (
+              <polygon points={polygonStr} fill="url(#subtle-grid)" />
+            ) : (
+              <rect width="100%" height="100%" fill="url(#subtle-grid)" />
+            )}
 
-            {/* Architectural Entrance Door Swing Arcs (under walls) */}
+            {/* 5. Architectural Entrance Door Swing Arcs (under doors) */}
             {doorsWithGeo.map(({ door, geo }) => (
               <path
                 key={`arc-${door.id}`}
@@ -754,51 +819,7 @@ export const FloorCanvas: React.FC = () => {
               />
             ))}
 
-            {/* Architectural Exterior Wall Boundary */}
-            {polygonStr ? (
-              <polygon
-                points={polygonStr}
-                fill="none"
-                stroke="#1e293b"
-                strokeWidth="12"
-                strokeLinejoin="round"
-              />
-            ) : (
-              <rect
-                x="6"
-                y="6"
-                width={roomPixelW - 12}
-                height={roomPixelH - 12}
-                rx="14"
-                fill="none"
-                stroke="#1e293b"
-                strokeWidth="12"
-              />
-            )}
-
-            {/* Inner Plaster Bevel Stroke */}
-            {polygonStr ? (
-              <polygon
-                points={polygonStr}
-                fill="none"
-                stroke="#475569"
-                strokeWidth="2"
-                strokeLinejoin="round"
-              />
-            ) : (
-              <rect
-                x="12"
-                y="12"
-                width={roomPixelW - 24}
-                height={roomPixelH - 24}
-                rx="8"
-                fill="none"
-                stroke="#cbd5e1"
-                strokeWidth="1.5"
-              />
-            )}
-
-            {/* Architectural Door Opening Cutout, Leaf, & Jambs for All Doors (on top of walls) */}
+            {/* 6. Architectural Door Opening Cutout, Leaf, & Jambs for All Doors (on top of walls) */}
             {doorsWithGeo.map(({ door, geo }) => (
               <g key={`assembly-${door.id}`} className="room-door-assembly">
                 {/* Wall Opening Cutout: clear the dark wall stroke */}

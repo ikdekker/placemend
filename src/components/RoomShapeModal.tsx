@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
 import { RoomShapeType, Point2D, WallSide, DoorSwing, RoomDoor } from '../types';
-import { rotateRoom90Clockwise, mirrorRoom, getRoomDoors } from '../utils/roomGeometry';
+import { rotateRoom90Clockwise, mirrorRoom, getRoomDoors, getRoomWallSegments, WallSegment } from '../utils/roomGeometry';
 import { 
   X, 
   Check, 
@@ -287,7 +287,7 @@ export const RoomShapeModal: React.FC = () => {
 
   const currentShape = room.shapeType || 'rectangle';
 
-  // Apply a preset shape
+  // Apply a preset shape live
   const handleApplyShape = async (preset: ShapePreset, variation?: string) => {
     const points = preset.generatePoints(room.gridWidth, room.gridHeight, variation || selectedVariation);
     await db.rooms.update(room.id, {
@@ -296,7 +296,6 @@ export const RoomShapeModal: React.FC = () => {
       updatedAt: Date.now(),
     });
     setCustomPoints(points);
-    setRoomShapeModalOpen(false);
   };
 
   // 90° Clockwise Room Rotation
@@ -404,10 +403,17 @@ export const RoomShapeModal: React.FC = () => {
     await persistDoors(remaining);
   };
 
+  const wallSegments = room ? getRoomWallSegments(room) : [];
+  const selectedDoorSeg = selectedDoor
+    ? (selectedDoor.segmentIndex !== undefined
+        ? wallSegments[selectedDoor.segmentIndex]
+        : wallSegments.find((s) => s.id === selectedDoor.wall || s.wallSide === selectedDoor.wall))
+    : undefined;
+  const currentSegLen = selectedDoorSeg
+    ? selectedDoorSeg.length
+    : (selectedDoor?.wall === 'top' || selectedDoor?.wall === 'bottom' ? room.gridWidth : room.gridHeight);
   const maxDoorOffset = selectedDoor
-    ? (selectedDoor.wall === 'top' || selectedDoor.wall === 'bottom'
-        ? Math.max(0, room.gridWidth - (selectedDoor.width || 2))
-        : Math.max(0, room.gridHeight - (selectedDoor.width || 2)))
+    ? Math.max(0, Math.floor(currentSegLen - (selectedDoor.width || 2)))
     : 0;
 
   return (
@@ -710,14 +716,6 @@ export const RoomShapeModal: React.FC = () => {
                 ))}
               </div>
 
-              <div className="flex justify-end pt-2">
-                <button
-                  onClick={handleSaveCustomShape}
-                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md transition-all active:scale-95 cursor-pointer"
-                >
-                  Save Custom Shape
-                </button>
-              </div>
             </div>
           )}
 
@@ -727,18 +725,10 @@ export const RoomShapeModal: React.FC = () => {
               {/* Header description */}
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                      Room Doors & Entrances
-                    </span>
-                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full flex items-center gap-1 border border-emerald-200/60">
-                      <Check className="w-3 h-3 text-emerald-500" />
-                      Auto-saved
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-400">
-                    Changes to walls, openings, and positions apply automatically
-                  </p>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                    <DoorOpen className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Room Doors & Entrances</span>
+                  </h4>
                 </div>
                 <button
                   onClick={handleAddDoor}
@@ -827,131 +817,182 @@ export const RoomShapeModal: React.FC = () => {
                       </span>
                     </div>
 
-                    <svg viewBox="0 0 280 130" className="w-full max-w-[280px] h-[130px] select-none">
-                      {/* Background grid */}
-                      <defs>
-                        <pattern id="modal-subtle-grid" width="14" height="14" patternUnits="userSpaceOnUse">
-                          <path d="M 14 0 L 0 0 0 14" fill="none" stroke="#334155" strokeWidth="0.5" opacity="0.4" />
-                        </pattern>
-                      </defs>
-                      <rect width="100%" height="100%" fill="url(#modal-subtle-grid)" rx="8" />
+                    {/* Dynamic Architectural Blueprint Preview */}
+                    {(() => {
+                      const roomPts: Point2D[] = (room.polygonPoints && room.polygonPoints.length >= 3)
+                        ? room.polygonPoints
+                        : [
+                            { x: 0, y: 0 },
+                            { x: room.gridWidth, y: 0 },
+                            { x: room.gridWidth, y: room.gridHeight },
+                            { x: 0, y: room.gridHeight },
+                          ];
 
-                      {/* Room base floor */}
-                      <rect x="40" y="25" width="200" height="80" fill="#1e293b" rx="6" />
+                      const bpBoxW = 200;
+                      const bpBoxH = 80;
+                      const bpScale = Math.min(bpBoxW / room.gridWidth, bpBoxH / room.gridHeight);
+                      const bpDrawW = room.gridWidth * bpScale;
+                      const bpDrawH = room.gridHeight * bpScale;
+                      const bpStartX = 40 + (bpBoxW - bpDrawW) / 2;
+                      const bpStartY = 25 + (bpBoxH - bpDrawH) / 2;
 
-                      {/* Wall Lines with Labels */}
-                      {/* Top Wall */}
-                      <line 
-                        x1="40" y1="25" x2="240" y2="25" 
-                        stroke={selectedDoor.wall === 'top' ? '#3b82f6' : '#475569'} 
-                        strokeWidth={selectedDoor.wall === 'top' ? '5' : '3'} 
-                      />
-                      <text x="140" y="18" fill={selectedDoor.wall === 'top' ? '#60a5fa' : '#64748b'} fontSize="9" fontWeight="bold" textAnchor="middle">
-                        TOP ({room.gridWidth}m)
-                      </text>
+                      const toBpX = (gx: number) => bpStartX + gx * bpScale;
+                      const toBpY = (gy: number) => bpStartY + gy * bpScale;
+                      const bpPolyStr = roomPts.map((p) => `${toBpX(p.x)},${toBpY(p.y)}`).join(' ');
 
-                      {/* Bottom Wall */}
-                      <line 
-                        x1="40" y1="105" x2="240" y2="105" 
-                        stroke={selectedDoor.wall === 'bottom' ? '#3b82f6' : '#475569'} 
-                        strokeWidth={selectedDoor.wall === 'bottom' ? '5' : '3'} 
-                      />
-                      <text x="140" y="122" fill={selectedDoor.wall === 'bottom' ? '#60a5fa' : '#64748b'} fontSize="9" fontWeight="bold" textAnchor="middle">
-                        BOTTOM ({room.gridWidth}m)
-                      </text>
+                      return (
+                        <svg viewBox="0 0 280 130" className="w-full max-w-[280px] h-[130px] select-none">
+                          {/* Background grid */}
+                          <defs>
+                            <pattern id="modal-subtle-grid" width="14" height="14" patternUnits="userSpaceOnUse">
+                              <path d="M 14 0 L 0 0 0 14" fill="none" stroke="#334155" strokeWidth="0.5" opacity="0.4" />
+                            </pattern>
+                          </defs>
+                          <rect width="100%" height="100%" fill="url(#modal-subtle-grid)" rx="8" />
 
-                      {/* Left Wall */}
-                      <line 
-                        x1="40" y1="25" x2="40" y2="105" 
-                        stroke={selectedDoor.wall === 'left' ? '#3b82f6' : '#475569'} 
-                        strokeWidth={selectedDoor.wall === 'left' ? '5' : '3'} 
-                      />
-                      <text x="18" y="68" fill={selectedDoor.wall === 'left' ? '#60a5fa' : '#64748b'} fontSize="9" fontWeight="bold" textAnchor="middle" transform="rotate(-90, 18, 68)">
-                        LEFT ({room.gridHeight}m)
-                      </text>
+                          {/* Room base floor polygon */}
+                          <polygon points={bpPolyStr} fill="#1e293b" />
 
-                      {/* Right Wall */}
-                      <line 
-                        x1="240" y1="25" x2="240" y2="105" 
-                        stroke={selectedDoor.wall === 'right' ? '#3b82f6' : '#475569'} 
-                        strokeWidth={selectedDoor.wall === 'right' ? '5' : '3'} 
-                      />
-                      <text x="262" y="68" fill={selectedDoor.wall === 'right' ? '#60a5fa' : '#64748b'} fontSize="9" fontWeight="bold" textAnchor="middle" transform="rotate(90, 262, 68)">
-                        RIGHT ({room.gridHeight}m)
-                      </text>
+                          {/* Wall Lines with Labels */}
+                          {wallSegments.map((seg) => {
+                            const x1 = toBpX(seg.p1.x);
+                            const y1 = toBpY(seg.p1.y);
+                            const x2 = toBpX(seg.p2.x);
+                            const y2 = toBpY(seg.p2.y);
+                            const isSelectedWall = selectedDoor.segmentIndex !== undefined
+                              ? selectedDoor.segmentIndex === seg.index
+                              : (selectedDoor.wall === seg.id || selectedDoor.wall === seg.wallSide);
 
-                      {/* Render All Doors in Blueprint */}
-                      {doorsList.map((d, idx) => {
-                        const isSelected = d.id === selectedDoor.id;
-                        const wallLen = d.wall === 'top' || d.wall === 'bottom' ? room.gridWidth : room.gridHeight;
-                        const fracOffset = wallLen > 0 ? d.offset / wallLen : 0;
-                        const fracWidth = wallLen > 0 ? (d.width || 2) / wallLen : 0.15;
-                        const swing = d.swing || 'inward_left';
-                        const isLeftHinge = swing.includes('left');
-                        const isInward = swing.includes('inward');
-                        const strokeColor = isSelected ? '#f59e0b' : '#38bdf8';
-                        const leafColor = isSelected ? '#fbbf24' : '#7dd3fc';
+                            const segDx = x2 - x1;
+                            const segDy = y2 - y1;
+                            const segLen = Math.hypot(segDx, segDy);
+                            const ux = segLen > 0 ? segDx / segLen : 1;
+                            const uy = segLen > 0 ? segDy / segLen : 0;
+                            // Outward normal (in screen coords, outward to left of direction vector)
+                            const onx = uy;
+                            const ony = -ux;
+                            const midX = (x1 + x2) / 2;
+                            const midY = (y1 + y2) / 2;
+                            const labelX = midX + onx * 12;
+                            const labelY = midY + ony * 12;
 
-                        if (d.wall === 'bottom') {
-                          const dx1 = 40 + fracOffset * 200;
-                          const dx2 = Math.min(240, dx1 + fracWidth * 200);
-                          const dw = dx2 - dx1;
-                          const hx = isLeftHinge ? dx1 : dx2;
-                          const hy = 105;
-                          const ly = isInward ? hy - dw : hy + dw;
-                          return (
-                            <g key={d.id || idx} onClick={() => setActiveDoorId(d.id || '')} className="cursor-pointer">
-                              <line x1={dx1} y1="105" x2={dx2} y2="105" stroke={strokeColor} strokeWidth={isSelected ? 6 : 4} />
-                              <line x1={hx} y1={hy} x2={hx} y2={ly} stroke={leafColor} strokeWidth="2.5" />
-                              <circle cx={hx} cy={hy} r={isSelected ? 3.5 : 2.5} fill={strokeColor} />
-                            </g>
-                          );
-                        } else if (d.wall === 'top') {
-                          const dx1 = 40 + fracOffset * 200;
-                          const dx2 = Math.min(240, dx1 + fracWidth * 200);
-                          const dw = dx2 - dx1;
-                          const hx = isLeftHinge ? dx1 : dx2;
-                          const hy = 25;
-                          const ly = isInward ? hy + dw : hy - dw;
-                          return (
-                            <g key={d.id || idx} onClick={() => setActiveDoorId(d.id || '')} className="cursor-pointer">
-                              <line x1={dx1} y1="25" x2={dx2} y2="25" stroke={strokeColor} strokeWidth={isSelected ? 6 : 4} />
-                              <line x1={hx} y1={hy} x2={hx} y2={ly} stroke={leafColor} strokeWidth="2.5" />
-                              <circle cx={hx} cy={hy} r={isSelected ? 3.5 : 2.5} fill={strokeColor} />
-                            </g>
-                          );
-                        } else if (d.wall === 'left') {
-                          const dy1 = 25 + fracOffset * 80;
-                          const dy2 = Math.min(105, dy1 + fracWidth * 80);
-                          const dw = dy2 - dy1;
-                          const hy = isLeftHinge ? dy1 : dy2;
-                          const hx = 40;
-                          const lx = isInward ? hx + dw : hx - dw;
-                          return (
-                            <g key={d.id || idx} onClick={() => setActiveDoorId(d.id || '')} className="cursor-pointer">
-                              <line x1="40" y1={dy1} x2="40" y2={dy2} stroke={strokeColor} strokeWidth={isSelected ? 6 : 4} />
-                              <line x1={hx} y1={hy} x2={lx} y2={hy} stroke={leafColor} strokeWidth="2.5" />
-                              <circle cx={hx} cy={hy} r={isSelected ? 3.5 : 2.5} fill={strokeColor} />
-                            </g>
-                          );
-                        } else {
-                          // right
-                          const dy1 = 25 + fracOffset * 80;
-                          const dy2 = Math.min(105, dy1 + fracWidth * 80);
-                          const dw = dy2 - dy1;
-                          const hy = isLeftHinge ? dy1 : dy2;
-                          const hx = 240;
-                          const lx = isInward ? hx - dw : hx + dw;
-                          return (
-                            <g key={d.id || idx} onClick={() => setActiveDoorId(d.id || '')} className="cursor-pointer">
-                              <line x1="240" y1={dy1} x2="240" y2={dy2} stroke={strokeColor} strokeWidth={isSelected ? 6 : 4} />
-                              <line x1={hx} y1={hy} x2={lx} y2={hy} stroke={leafColor} strokeWidth="2.5" />
-                              <circle cx={hx} cy={hy} r={isSelected ? 3.5 : 2.5} fill={strokeColor} />
-                            </g>
-                          );
-                        }
-                      })}
-                    </svg>
+                            return (
+                              <g
+                                key={`seg-line-${seg.index}`}
+                                onClick={() => {
+                                  const curWidth = selectedDoor.width || 2;
+                                  const maxOff = Math.max(0, Math.floor(seg.length - curWidth));
+                                  const newOffset = Math.min(selectedDoor.offset, maxOff);
+                                  updateSelectedDoor({
+                                    wall: seg.wallSide || (seg.isSlanted ? `slanted-${seg.index}` : seg.id),
+                                    segmentIndex: seg.index,
+                                    offset: newOffset,
+                                  });
+                                }}
+                                className="cursor-pointer"
+                              >
+                                <line
+                                  x1={x1}
+                                  y1={y1}
+                                  x2={x2}
+                                  y2={y2}
+                                  stroke={isSelectedWall ? '#3b82f6' : '#64748b'}
+                                  strokeWidth={isSelectedWall ? '5' : '2.5'}
+                                  strokeLinecap="round"
+                                />
+                                {segLen > 22 && (
+                                  <text
+                                    x={labelX}
+                                    y={labelY}
+                                    fill={isSelectedWall ? '#60a5fa' : '#94a3b8'}
+                                    fontSize="7.5"
+                                    fontWeight="bold"
+                                    textAnchor="middle"
+                                    dominantBaseline="middle"
+                                  >
+                                    {seg.isSlanted ? `ANGLED (${seg.length.toFixed(1)}m)` : `${(seg.wallSide || seg.id).toUpperCase()} (${seg.length.toFixed(1)}m)`}
+                                  </text>
+                                )}
+                              </g>
+                            );
+                          })}
+
+                          {/* Render All Doors in Blueprint */}
+                          {doorsList.map((d, idx) => {
+                            const isSelected = d.id === selectedDoor.id;
+                            const dSeg = d.segmentIndex !== undefined
+                              ? wallSegments[d.segmentIndex]
+                              : wallSegments.find((s) => s.id === d.wall || s.wallSide === d.wall) || wallSegments[0];
+                            if (!dSeg) return null;
+
+                            const ds1x = toBpX(dSeg.p1.x);
+                            const ds1y = toBpY(dSeg.p1.y);
+                            const ds2x = toBpX(dSeg.p2.x);
+                            const ds2y = toBpY(dSeg.p2.y);
+                            const segBpLen = Math.hypot(ds2x - ds1x, ds2y - ds1y);
+                            const ux = segBpLen > 0 ? (ds2x - ds1x) / segBpLen : 1;
+                            const uy = segBpLen > 0 ? (ds2y - ds1y) / segBpLen : 0;
+                            // Inward normal (clockwise polygon winding has inward normal (-uy, ux))
+                            const inx = -uy;
+                            const iny = ux;
+
+                            const dWidthBp = (d.width || 2) * bpScale;
+                            const dOffsetBp = Math.min(d.offset * bpScale, Math.max(0, segBpLen - dWidthBp));
+
+                            const t1x = ds1x + ux * dOffsetBp;
+                            const t1y = ds1y + uy * dOffsetBp;
+                            const t2x = t1x + ux * dWidthBp;
+                            const t2y = t1y + uy * dWidthBp;
+
+                            const swing = d.swing || 'inward_left';
+                            const isLeft = swing.includes('left');
+                            const isInward = swing.includes('inward');
+                            const normalMult = isInward ? 1 : -1;
+
+                            const hx = isLeft ? t1x : t2x;
+                            const hy = isLeft ? t1y : t2y;
+                            const leafTipX = hx + inx * dWidthBp * normalMult;
+                            const leafTipY = hy + iny * dWidthBp * normalMult;
+
+                            const strokeColor = isSelected ? '#f59e0b' : '#38bdf8';
+                            const leafColor = isSelected ? '#fbbf24' : '#7dd3fc';
+
+                            return (
+                              <g
+                                key={d.id || idx}
+                                onClick={() => setActiveDoorId(d.id || '')}
+                                className="cursor-pointer"
+                              >
+                                <line
+                                  x1={t1x}
+                                  y1={t1y}
+                                  x2={t2x}
+                                  y2={t2y}
+                                  stroke={strokeColor}
+                                  strokeWidth={isSelected ? 6 : 4}
+                                  strokeLinecap="round"
+                                />
+                                <line
+                                  x1={hx}
+                                  y1={hy}
+                                  x2={leafTipX}
+                                  y2={leafTipY}
+                                  stroke={leafColor}
+                                  strokeWidth="2.5"
+                                  strokeLinecap="round"
+                                />
+                                <circle
+                                  cx={hx}
+                                  cy={hy}
+                                  r={isSelected ? 3.5 : 2.5}
+                                  fill={strokeColor}
+                                />
+                              </g>
+                            );
+                          })}
+                        </svg>
+                      );
+                    })()}
                   </div>
 
                   {/* 1. Door Width / Opening Size */}
@@ -971,8 +1012,7 @@ export const RoomShapeModal: React.FC = () => {
                         <button
                           key={item.w}
                           onClick={() => {
-                            const wallLen = selectedDoor.wall === 'top' || selectedDoor.wall === 'bottom' ? room.gridWidth : room.gridHeight;
-                            const newOffset = selectedDoor.offset + item.w > wallLen ? Math.max(0, wallLen - item.w) : selectedDoor.offset;
+                            const newOffset = selectedDoor.offset + item.w > currentSegLen ? Math.max(0, currentSegLen - item.w) : selectedDoor.offset;
                             updateSelectedDoor({ width: item.w, offset: newOffset });
                           }}
                           className={`py-2 px-2 rounded-xl text-center cursor-pointer transition-all ${
@@ -990,37 +1030,42 @@ export const RoomShapeModal: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* 2. Wall Selection */}
+                  {/* 2. Wall Selection (All Segments, including Slanted Walls) */}
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1.5">
                       2. Select Wall
                     </label>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      {[
-                        { id: 'top' as WallSide, label: '⬆ Top Wall', len: room.gridWidth },
-                        { id: 'bottom' as WallSide, label: '⬇ Bottom Wall', len: room.gridWidth },
-                        { id: 'left' as WallSide, label: '⬅ Left Wall', len: room.gridHeight },
-                        { id: 'right' as WallSide, label: '➡ Right Wall', len: room.gridHeight },
-                      ].map((w) => (
-                        <button
-                          key={w.id}
-                          onClick={() => {
-                            const curWidth = selectedDoor.width || 2;
-                            const newOffset = selectedDoor.offset + curWidth > w.len ? Math.max(0, w.len - curWidth) : selectedDoor.offset;
-                            updateSelectedDoor({ wall: w.id, offset: newOffset });
-                          }}
-                          className={`py-2 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                            selectedDoor.wall === w.id
-                              ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
-                              : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                          }`}
-                        >
-                          <div>{w.label}</div>
-                          <div className={`text-[10px] font-normal ${selectedDoor.wall === w.id ? 'text-blue-100' : 'text-slate-400'}`}>
-                            {w.len}m long
-                          </div>
-                        </button>
-                      ))}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {wallSegments.map((seg) => {
+                        const isSelected = selectedDoor.segmentIndex !== undefined
+                          ? selectedDoor.segmentIndex === seg.index
+                          : (selectedDoor.wall === seg.id || selectedDoor.wall === seg.wallSide);
+                        return (
+                          <button
+                            key={seg.index}
+                            onClick={() => {
+                              const curWidth = selectedDoor.width || 2;
+                              const maxOff = Math.max(0, Math.floor(seg.length - curWidth));
+                              const newOffset = Math.min(selectedDoor.offset, maxOff);
+                              updateSelectedDoor({
+                                wall: seg.wallSide || (seg.isSlanted ? `slanted-${seg.index}` : seg.id),
+                                segmentIndex: seg.index,
+                                offset: newOffset,
+                              });
+                            }}
+                            className={`py-2 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-left ${
+                              isSelected
+                                ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                            }`}
+                          >
+                            <div className="truncate">{seg.label}</div>
+                            <div className={`text-[10px] font-normal ${isSelected ? 'text-blue-100' : 'text-slate-400'}`}>
+                              {seg.length.toFixed(1)}m long {seg.isSlanted ? '• Slanted' : ''}
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -1108,15 +1153,32 @@ export const RoomShapeModal: React.FC = () => {
 
         {/* Footer */}
         <div className="p-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-2">
-          <span className="text-[11px] text-slate-400 font-medium px-1">
-            All changes save automatically
-          </span>
-          <button
-            onClick={() => setRoomShapeModalOpen(false)}
-            className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition-all active:scale-95 cursor-pointer"
-          >
-            Done
-          </button>
+          {activeTab === 'custom' ? (
+            <>
+              <button
+                onClick={() => setRoomShapeModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-200/70 font-bold text-xs transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveCustomShape}
+                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition-all active:scale-95 cursor-pointer"
+              >
+                Save Custom Shape
+              </button>
+            </>
+          ) : (
+            <>
+              <div />
+              <button
+                onClick={() => setRoomShapeModalOpen(false)}
+                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition-all active:scale-95 cursor-pointer"
+              >
+                Done
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

@@ -16,8 +16,9 @@ export type DoorSwing = 'inward_left' | 'inward_right' | 'outward_left' | 'outwa
 export type RoomDoor = {
   id?: string;
   label?: string;
-  wall: WallSide;
-  offset: number; // grid units from start of wall
+  wall: WallSide | string;
+  segmentIndex?: number; // 0-based wall segment index in room polygon
+  offset: number; // grid units from start of wall segment
   swing?: DoorSwing;
   width?: number; // default: 2 grid units
 };
