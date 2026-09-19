@@ -18,6 +18,7 @@ export interface AppState {
   // Canvas Viewport Controls
   zoom: number;
   panOffset: { x: number; y: number };
+  fitViewTrigger: number;
   gridSnap: boolean;
   showLabels: boolean;
   isRoomShapeModalOpen: boolean;
@@ -69,8 +70,9 @@ export const useAppStore = create<AppState>((set) => ({
   selectedContainerId: null,
   highlightedFurnitureId: null,
 
-  zoom: 1,
-  panOffset: { x: 80, y: 80 },
+  zoom: typeof window !== 'undefined' && window.innerWidth < 768 ? 0.46 : 1,
+  panOffset: typeof window !== 'undefined' && window.innerWidth < 768 ? { x: 12, y: 180 } : { x: 80, y: 80 },
+  fitViewTrigger: 0,
   gridSnap: true,
   showLabels: true,
   isRoomShapeModalOpen: false,
@@ -84,14 +86,20 @@ export const useAppStore = create<AppState>((set) => ({
   searchQuery: '',
 
   setSelectedLocationId: (id) => set({ selectedLocationId: id }),
-  setSelectedRoomId: (id) => set({ selectedRoomId: id, selectedFurnitureId: null, selectedContainerId: null }),
+  setSelectedRoomId: (id) =>
+    set((s) => ({
+      selectedRoomId: id,
+      selectedFurnitureId: null,
+      selectedContainerId: null,
+      fitViewTrigger: s.fitViewTrigger + 1,
+    })),
   setSelectedFurnitureId: (id) => set({ selectedFurnitureId: id }),
   setSelectedContainerId: (id) => set({ selectedContainerId: id }),
   setHighlightedFurnitureId: (id) => set({ highlightedFurnitureId: id }),
 
   setZoom: (zoomOrFn) =>
     set((state) => ({
-      zoom: Math.min(3, Math.max(0.3, typeof zoomOrFn === 'function' ? zoomOrFn(state.zoom) : zoomOrFn)),
+      zoom: Math.min(3, Math.max(0.15, typeof zoomOrFn === 'function' ? zoomOrFn(state.zoom) : zoomOrFn)),
     })),
 
   setPanOffset: (offsetOrFn) =>
@@ -99,7 +107,7 @@ export const useAppStore = create<AppState>((set) => ({
       panOffset: typeof offsetOrFn === 'function' ? offsetOrFn(state.panOffset) : offsetOrFn,
     })),
 
-  resetView: () => set({ zoom: 1, panOffset: { x: 80, y: 80 } }),
+  resetView: () => set((s) => ({ fitViewTrigger: s.fitViewTrigger + 1 })),
 
   toggleGridSnap: () => set((s) => ({ gridSnap: !s.gridSnap })),
   toggleShowLabels: () => set((s) => ({ showLabels: !s.showLabels })),

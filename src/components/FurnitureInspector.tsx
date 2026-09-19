@@ -99,11 +99,21 @@ export const FurnitureInspector: React.FC = () => {
   };
 
   return (
-    <aside className="fixed md:static inset-x-0 bottom-0 z-40 md:z-10 w-full md:w-96 max-h-[85vh] md:max-h-full bg-white border-t md:border-t-0 md:border-l border-slate-200 flex flex-col rounded-t-3xl md:rounded-none shadow-2xl md:shadow-xl overflow-hidden animate-in slide-in-from-bottom md:slide-in-from-right duration-200">
-      {/* Mobile Drawer Grab Handle */}
-      <div className="md:hidden w-full flex items-center justify-center pt-2.5 pb-1 bg-slate-50/80">
-        <div className="w-12 h-1.5 rounded-full bg-slate-300" />
-      </div>
+    <>
+      {/* Mobile Backdrop to easily dismiss drawer by tapping outside */}
+      <div 
+        onClick={() => setSelectedFurnitureId(null)}
+        className="md:hidden fixed inset-0 bg-slate-900/30 backdrop-blur-xs z-40 transition-opacity"
+      />
+
+      <aside className="fixed md:static inset-x-0 bottom-0 z-50 md:z-10 w-full md:w-96 max-h-[82vh] md:max-h-full bg-white border-t md:border-t-0 md:border-l border-slate-200 flex flex-col rounded-t-3xl md:rounded-none shadow-2xl md:shadow-xl overflow-hidden animate-in slide-in-from-bottom md:slide-in-from-right duration-200">
+        {/* Mobile Drawer Grab Handle */}
+        <div 
+          onClick={() => setSelectedFurnitureId(null)}
+          className="md:hidden w-full flex items-center justify-center pt-2.5 pb-1 bg-slate-50/80 cursor-pointer"
+        >
+          <div className="w-12 h-1.5 rounded-full bg-slate-300" />
+        </div>
 
       {/* Furniture Header */}
       <div className="p-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50/80 backdrop-blur-md">
@@ -342,5 +352,6 @@ export const FurnitureInspector: React.FC = () => {
         )}
       </div>
     </aside>
+    </>
   );
 };

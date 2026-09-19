@@ -97,6 +97,7 @@ export const FurnitureLibrary: React.FC = () => {
     isFurnitureLibraryOpen,
     setFurnitureLibraryOpen,
     setSelectedFurnitureId,
+    setAppMode,
   } = useAppStore();
 
   const [customName, setCustomName] = useState('');
@@ -142,6 +143,7 @@ export const FurnitureLibrary: React.FC = () => {
     });
 
     setSelectedFurnitureId(newFurnitureId);
+    setAppMode('edit');
     setFurnitureLibraryOpen(false);
   };
 
@@ -181,6 +183,7 @@ export const FurnitureLibrary: React.FC = () => {
     });
 
     setSelectedFurnitureId(newFurnitureId);
+    setAppMode('edit');
     setFurnitureLibraryOpen(false);
   };
 
