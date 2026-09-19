@@ -99,7 +99,12 @@ export const FurnitureInspector: React.FC = () => {
   };
 
   return (
-    <aside className="w-80 sm:w-96 bg-white border-l border-slate-200 flex flex-col h-full z-10 select-none shadow-xl">
+    <aside className="fixed md:static inset-x-0 bottom-0 z-40 md:z-10 w-full md:w-96 max-h-[85vh] md:max-h-full bg-white border-t md:border-t-0 md:border-l border-slate-200 flex flex-col rounded-t-3xl md:rounded-none shadow-2xl md:shadow-xl overflow-hidden animate-in slide-in-from-bottom md:slide-in-from-right duration-200">
+      {/* Mobile Drawer Grab Handle */}
+      <div className="md:hidden w-full flex items-center justify-center pt-2.5 pb-1 bg-slate-50/80">
+        <div className="w-12 h-1.5 rounded-full bg-slate-300" />
+      </div>
+
       {/* Furniture Header */}
       <div className="p-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50/80 backdrop-blur-md">
         <div className="flex items-center gap-2.5 min-w-0">

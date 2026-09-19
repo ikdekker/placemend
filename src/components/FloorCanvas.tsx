@@ -85,28 +85,28 @@ export const FloorCanvas: React.FC = () => {
     setZoom((prev) => prev * delta);
   };
 
-  // Background pan
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.target === containerRef.current || (e.target as HTMLElement).classList.contains('canvas-bg')) {
+  // Pointer / Touch handlers
+  const handlePointerDown = (clientX: number, clientY: number, target: EventTarget) => {
+    if (target === containerRef.current || (target as HTMLElement).classList.contains('canvas-bg')) {
       setIsPanning(true);
-      setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
+      setPanStart({ x: clientX - panOffset.x, y: clientY - panOffset.y });
       setSelectedFurnitureId(null);
     }
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
+  const handlePointerMove = (clientX: number, clientY: number) => {
     if (isPanning) {
       setPanOffset({
-        x: e.clientX - panStart.x,
-        y: e.clientY - panStart.y,
+        x: clientX - panStart.x,
+        y: clientY - panStart.y,
       });
       return;
     }
 
     // Moving furniture in Edit Mode
     if (draggingFurnitureId && appMode === 'edit') {
-      const dx = (e.clientX - dragStartPos.mouseX) / (unitSize * zoom);
-      const dy = (e.clientY - dragStartPos.mouseY) / (unitSize * zoom);
+      const dx = (clientX - dragStartPos.mouseX) / (unitSize * zoom);
+      const dy = (clientY - dragStartPos.mouseY) / (unitSize * zoom);
 
       let newX = dragStartPos.origX + dx;
       let newY = dragStartPos.origY + dy;
@@ -135,8 +135,8 @@ export const FloorCanvas: React.FC = () => {
 
     // Resizing furniture in Edit Mode
     if (resizingFurnitureId && appMode === 'edit') {
-      const dx = (e.clientX - resizeStart.mouseX) / (unitSize * zoom);
-      const dy = (e.clientY - resizeStart.mouseY) / (unitSize * zoom);
+      const dx = (clientX - resizeStart.mouseX) / (unitSize * zoom);
+      const dy = (clientY - resizeStart.mouseY) / (unitSize * zoom);
 
       let newW = resizeStart.origW + dx;
       let newL = resizeStart.origL + dy;
@@ -157,11 +157,29 @@ export const FloorCanvas: React.FC = () => {
     }
   };
 
-  const handleMouseUp = () => {
+  const handlePointerUp = () => {
     setIsPanning(false);
     setDraggingFurnitureId(null);
     setResizingFurnitureId(null);
   };
+
+  // Mouse wrapper events
+  const handleMouseDown = (e: React.MouseEvent) => handlePointerDown(e.clientX, e.clientY, e.target);
+  const handleMouseMove = (e: React.MouseEvent) => handlePointerMove(e.clientX, e.clientY);
+  const handleMouseUp = () => handlePointerUp();
+
+  // Touch wrapper events
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 1 && e.touches[0]) {
+      handlePointerDown(e.touches[0].clientX, e.touches[0].clientY, e.target);
+    }
+  };
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 1 && e.touches[0]) {
+      handlePointerMove(e.touches[0].clientX, e.touches[0].clientY);
+    }
+  };
+  const handleTouchEnd = () => handlePointerUp();
 
   // Rotate selected furniture 90°
   const rotateSelectedFurniture = async () => {
@@ -205,8 +223,11 @@ export const FloorCanvas: React.FC = () => {
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
       onWheel={handleWheel}
-      className="relative flex-1 w-full h-full bg-slate-100 overflow-hidden select-none cursor-grab active:cursor-grabbing canvas-bg"
+      className="relative flex-1 w-full h-full bg-slate-100 overflow-hidden select-none cursor-grab active:cursor-grabbing canvas-bg touch-none"
     >
       {/* Floating Canvas Controls (Top Left) */}
       <div className="absolute top-4 left-4 z-10 flex items-center gap-1.5 bg-white/95 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 shadow-md text-slate-700">
@@ -377,6 +398,19 @@ export const FloorCanvas: React.FC = () => {
                     });
                   }
                 }}
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                  setSelectedFurnitureId(furn.id);
+                  if (appMode === 'edit' && e.touches[0]) {
+                    setDraggingFurnitureId(furn.id);
+                    setDragStartPos({
+                      mouseX: e.touches[0].clientX,
+                      mouseY: e.touches[0].clientY,
+                      origX: furn.position.x,
+                      origY: furn.position.y,
+                    });
+                  }
+                }}
                 style={{
                   left: `${left}px`,
                   top: `${top}px`,
@@ -420,7 +454,7 @@ export const FloorCanvas: React.FC = () => {
                   </div>
                 )}
 
-                {/* Bottom-Right Resize Handle (Visible in Edit Mode) */}
+                {/* Bottom-Right Resize Handle (Visible in Edit Mode, sized for mobile touch) */}
                 {appMode === 'edit' && (
                   <div
                     onMouseDown={(e) => {
@@ -434,10 +468,23 @@ export const FloorCanvas: React.FC = () => {
                         origL: furn.dimension.length,
                       });
                     }}
-                    className="absolute bottom-0.5 right-0.5 w-4 h-4 rounded-br-lg bg-white/90 hover:bg-white text-slate-800 shadow-md flex items-center justify-center cursor-se-resize z-30 transition-transform active:scale-125"
+                    onTouchStart={(e) => {
+                      e.stopPropagation();
+                      setSelectedFurnitureId(furn.id);
+                      if (e.touches[0]) {
+                        setResizingFurnitureId(furn.id);
+                        setResizeStart({
+                          mouseX: e.touches[0].clientX,
+                          mouseY: e.touches[0].clientY,
+                          origW: furn.dimension.width,
+                          origL: furn.dimension.length,
+                        });
+                      }
+                    }}
+                    className="absolute bottom-0.5 right-0.5 w-6 h-6 sm:w-4 sm:h-4 rounded-br-lg bg-white/95 text-slate-800 shadow-md flex items-center justify-center cursor-se-resize z-30 transition-transform active:scale-125 border border-slate-300"
                     title="Drag to resize dimensions"
                   >
-                    <Scaling className="w-2.5 h-2.5" />
+                    <Scaling className="w-3.5 h-3.5 sm:w-2.5 sm:h-2.5 text-blue-600" />
                   </div>
                 )}
               </div>
