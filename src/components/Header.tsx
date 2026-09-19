@@ -107,8 +107,8 @@ export const Header: React.FC = () => {
           </div>
 
           {/* Room Selector */}
-          <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium">
-            <MapPin className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
+          <div className="flex items-center gap-1.5 bg-slate-100 px-2.5 py-1.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium min-h-[38px]">
+            <MapPin className="w-4 h-4 text-blue-600 flex-shrink-0" />
             <select
               value={selectedRoomId || ''}
               onChange={(e) => setSelectedRoomId(e.target.value)}
@@ -184,14 +184,14 @@ export const Header: React.FC = () => {
           {/* Mobile Search Button */}
           <button
             onClick={() => setSearchOpen(true)}
-            className={`md:hidden p-1.5 rounded-xl transition-all cursor-pointer ${
+            className={`md:hidden p-2 rounded-xl transition-all cursor-pointer min-w-[38px] min-h-[38px] flex items-center justify-center ${
               isSearching 
                 ? 'bg-amber-500 text-white shadow-md shadow-amber-500/20' 
                 : 'text-slate-600 hover:text-blue-600 hover:bg-slate-100'
             }`}
             title="Search items visually"
           >
-            <Search className="w-4 h-4" />
+            <Search className="w-4.5 h-4.5" />
           </button>
 
           {/* Desktop View vs Edit Mode */}
@@ -247,10 +247,10 @@ export const Header: React.FC = () => {
           {/* Backup Button */}
           <button
             onClick={() => setBackupModalOpen(true)}
-            className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer border border-transparent hover:border-slate-200"
+            className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer border border-transparent hover:border-slate-200 min-w-[38px] min-h-[38px] flex items-center justify-center"
             title="Backup & Export JSON Data"
           >
-            <Download className="w-4 h-4" />
+            <Download className="w-4.5 h-4.5" />
           </button>
         </div>
       )}

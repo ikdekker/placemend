@@ -122,18 +122,18 @@ export const DrawerInteriorView: React.FC = () => {
   const getItemVisualIcon = (item: Item) => {
     const text = (item.name + ' ' + (item.category || '')).toLowerCase();
     if (text.includes('cable') || text.includes('usb') || text.includes('hdmi') || text.includes('charger') || text.includes('adapter')) {
-      return <Cable className="w-6 h-6 text-cyan-600" />;
+      return <Cable className="w-7 h-7 sm:w-8 sm:h-8 text-cyan-600" />;
     }
     if (text.includes('game') || text.includes('catan') || text.includes('dice') || text.includes('poker') || text.includes('playstation') || text.includes('controller')) {
-      return <Dices className="w-6 h-6 text-purple-600" />;
+      return <Dices className="w-7 h-7 sm:w-8 sm:h-8 text-purple-600" />;
     }
     if (text.includes('book') || text.includes('kindle') || text.includes('manual') || text.includes('notebook')) {
-      return <BookOpen className="w-6 h-6 text-amber-600" />;
+      return <BookOpen className="w-7 h-7 sm:w-8 sm:h-8 text-amber-600" />;
     }
     if (text.includes('tool') || text.includes('caliper') || text.includes('wrench') || text.includes('meter') || text.includes('hex') || text.includes('screw')) {
-      return <Wrench className="w-6 h-6 text-orange-600" />;
+      return <Wrench className="w-7 h-7 sm:w-8 sm:h-8 text-orange-600" />;
     }
-    return <Package className="w-6 h-6 text-blue-600" />;
+    return <Package className="w-7 h-7 sm:w-8 sm:h-8 text-blue-600" />;
   };
 
   const backLabel = parentContainer ? parentContainer.name : furniture.name;
@@ -141,20 +141,20 @@ export const DrawerInteriorView: React.FC = () => {
   return (
     <div className="flex-1 min-h-0 w-full bg-slate-100 flex flex-col overflow-hidden animate-in fade-in duration-150">
       {/* Top Header Bar */}
-      <div className="bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between shadow-xs flex-shrink-0">
+      <div className="bg-white border-b border-slate-200 px-3.5 sm:px-5 py-3 sm:py-3.5 flex items-center justify-between shadow-xs flex-shrink-0 gap-2">
         <div className="flex items-center gap-2.5 min-w-0">
           <button
             data-action="drawer-back"
             onClick={handleStepBack}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs sm:text-sm transition-all cursor-pointer shadow-xs active:scale-95 flex-shrink-0"
+            className="flex items-center gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs sm:text-sm transition-all cursor-pointer shadow-xs active:scale-95 flex-shrink-0 min-h-[44px]"
           >
-            <ArrowLeft className="w-4 h-4 text-blue-600 stroke-[2.5]" />
+            <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 stroke-[2.5]" />
             <span className="sm:hidden">Back</span>
             <span className="hidden sm:inline truncate max-w-[150px]">{backLabel}</span>
           </button>
 
           <div className="truncate min-w-0">
-            <h1 className="font-extrabold text-base sm:text-lg text-slate-900 tracking-tight truncate">
+            <h1 className="font-extrabold text-base sm:text-xl text-slate-900 tracking-tight truncate">
               {activeContainer.name}
             </h1>
           </div>
@@ -164,9 +164,9 @@ export const DrawerInteriorView: React.FC = () => {
         {childCompartments.length === 0 && (
           <button
             onClick={() => setItemModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-500/20 transition-all cursor-pointer active:scale-95 flex-shrink-0"
+            className="flex items-center gap-2 px-4 py-2 sm:py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm shadow-md shadow-emerald-500/20 transition-all cursor-pointer active:scale-95 flex-shrink-0 min-h-[44px]"
           >
-            <Plus className="w-4 h-4 stroke-[2.5]" />
+            <Plus className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
             <span>Add Item</span>
           </button>
         )}
@@ -180,20 +180,20 @@ export const DrawerInteriorView: React.FC = () => {
           {childCompartments.length > 0 ? (
             <div className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                <span className="text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-500">
                   Organizer Compartments ({childCompartments.length})
                 </span>
                 <button
                   onClick={() => setIsAddingCompartment(true)}
-                  className="text-xs font-bold text-blue-600 hover:text-blue-800 cursor-pointer flex items-center gap-1"
+                  className="px-3 py-1.5 rounded-xl text-xs sm:text-sm font-bold text-blue-600 hover:text-blue-800 hover:bg-blue-50 cursor-pointer flex items-center gap-1.5 transition-colors min-h-[36px]"
                 >
-                  <Plus className="w-3.5 h-3.5" />
+                  <Plus className="w-4 h-4" />
                   <span>New Divider</span>
                 </button>
               </div>
 
               {/* Physical Organizer Tray Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 rounded-3xl bg-amber-50/60 border-4 border-amber-900/15 shadow-inner">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 sm:p-5 rounded-3xl bg-amber-50/60 border-4 border-amber-900/15 shadow-inner">
                 {childCompartments.map((comp) => {
                   const count = childItemCounts[comp.id] || 0;
                   const isCompMatch = isSearching && matchingContainerIds.has(comp.id);
@@ -204,41 +204,41 @@ export const DrawerInteriorView: React.FC = () => {
                     <div
                       key={comp.id}
                       onClick={() => setSelectedContainerId(comp.id)}
-                      className={`p-4 rounded-2xl transition-all cursor-pointer flex items-center justify-between group active:scale-98 ${
+                      className={`p-4 sm:p-5 rounded-2xl sm:rounded-3xl transition-all cursor-pointer flex items-center justify-between group active:scale-98 min-h-[90px] sm:min-h-[105px] ${
                         isCompMatch
-                          ? 'bg-amber-50/95 border-2 border-amber-400 ring-3 ring-amber-400 shadow-md scale-[1.01]'
+                          ? 'bg-amber-50/95 border-2 border-amber-400 ring-4 ring-amber-400 shadow-md scale-[1.01]'
                           : 'bg-white border-2 border-amber-200 hover:border-blue-500 shadow-sm hover:shadow-lg'
                       } ${isCompDimmed ? 'opacity-35 grayscale-[25%]' : 'opacity-100'}`}
                     >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className={`p-2.5 rounded-xl flex-shrink-0 ${
+                      <div className="flex items-center gap-3.5 min-w-0">
+                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 ${
                           isCompMatch ? 'bg-amber-100 text-amber-800' : 'bg-purple-50 text-purple-600'
                         }`}>
-                          <LayoutGrid className="w-5 h-5" />
+                          <LayoutGrid className="w-7 h-7" />
                         </div>
                         <div className="truncate min-w-0">
-                          <h3 className={`font-extrabold text-sm truncate ${
-                            isCompMatch ? 'text-amber-950 font-black' : 'text-slate-800 group-hover:text-blue-600'
+                          <h3 className={`font-black text-base sm:text-lg truncate ${
+                            isCompMatch ? 'text-amber-950' : 'text-slate-800 group-hover:text-blue-600'
                           }`}>
                             {comp.name}
                           </h3>
-                          <span className="text-[11px] font-semibold text-slate-400">
+                          <span className="text-xs sm:text-sm font-semibold text-slate-400">
                             {count} {count === 1 ? 'item' : 'items'}
                           </span>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 flex-shrink-0">
+                      <div className="flex items-center gap-2.5 flex-shrink-0">
                         {isCompMatch && (
-                          <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white font-extrabold text-[10px] shadow-xs flex items-center gap-1 animate-pulse">
+                          <span className="px-3 py-1 rounded-full bg-amber-500 text-white font-black text-xs shadow-xs flex items-center gap-1 animate-pulse">
                             <span>⚡</span>
-                            <span>{compMatchCount} {compMatchCount === 1 ? 'match' : 'matches'}</span>
+                            <span>{compMatchCount}</span>
                           </span>
                         )}
-                        <div className={`w-7 h-7 rounded-xl flex items-center justify-center transition-colors text-slate-400 flex-shrink-0 ${
+                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-colors text-slate-400 flex-shrink-0 ${
                           isCompMatch ? 'bg-amber-500 text-white' : 'bg-slate-100 group-hover:bg-blue-600 group-hover:text-white'
                         }`}>
-                          <ChevronRight className="w-4 h-4 stroke-[2.5]" />
+                          <ChevronRight className="w-5 h-5 stroke-[2.5]" />
                         </div>
                       </div>
                     </div>
@@ -250,43 +250,43 @@ export const DrawerInteriorView: React.FC = () => {
             /* Deepest Level: Visual Item Cards Inside The Drawer */
             <div className="flex flex-col gap-4">
               {/* Drawer Interior Tray Box */}
-              <div className="rounded-3xl bg-white/90 border-4 border-slate-300/80 shadow-xl p-4 sm:p-5 flex flex-col gap-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+              <div className="rounded-3xl bg-white/90 border-4 border-slate-300/80 shadow-xl p-4 sm:p-6 flex flex-col gap-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                    <span className="text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-500">
                       Items Inside ({items.length})
                     </span>
                   </div>
 
                   <button
                     onClick={() => setIsAddingCompartment(true)}
-                    className="flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-blue-600 transition-colors cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs sm:text-sm font-bold text-slate-500 hover:text-blue-600 hover:bg-slate-100 transition-colors cursor-pointer min-h-[36px]"
                     title="Add a divider to split this drawer into compartments"
                   >
-                    <SplitSquareVertical className="w-3.5 h-3.5" />
+                    <SplitSquareVertical className="w-4 h-4" />
                     <span>Split into Compartments</span>
                   </button>
                 </div>
 
-                {/* Visual Items Grid (2 cols on mobile, 3 on tablet) */}
+                {/* Visual Items Grid (1 col on narrow mobile, 2 on regular mobile/tablet) */}
                 {items.length === 0 ? (
                   <div className="py-12 flex flex-col items-center justify-center text-center gap-3">
-                    <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-300">
-                      <Package className="w-8 h-8" />
+                    <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-300">
+                      <Package className="w-9 h-9" />
                     </div>
                     <div>
-                      <h3 className="font-bold text-slate-700 text-sm">This drawer is empty</h3>
-                      <p className="text-xs text-slate-400 mt-0.5">Add your first stored item below</p>
+                      <h3 className="font-bold text-slate-700 text-base">This drawer is empty</h3>
+                      <p className="text-xs sm:text-sm text-slate-400 mt-0.5">Add your first stored item below</p>
                     </div>
                     <button
                       onClick={() => setItemModalOpen(true)}
-                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-500/20 transition-all cursor-pointer"
+                      className="px-5 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm shadow-md shadow-emerald-500/20 transition-all cursor-pointer min-h-[44px]"
                     >
                       + Add Item Here
                     </button>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
                     {[...items]
                       .sort((a, b) => {
                         if (isSearching) {
@@ -305,7 +305,7 @@ export const DrawerInteriorView: React.FC = () => {
                         <div
                           key={item.id}
                           onClick={() => setItemModalOpen(true, item.id)}
-                          className={`relative p-3.5 rounded-2xl transition-all cursor-pointer flex flex-col justify-between gap-3 group active:scale-98 ${
+                          className={`relative p-4 sm:p-5 rounded-2xl sm:rounded-3xl transition-all cursor-pointer flex flex-col justify-between gap-3.5 group active:scale-98 min-h-[140px] ${
                             isItemMatch
                               ? 'bg-amber-50/95 border-2 border-amber-400 ring-4 ring-amber-400 shadow-xl shadow-amber-400/30 scale-[1.02] z-10'
                               : 'bg-slate-50/80 hover:bg-white border-2 border-slate-200 hover:border-blue-400 shadow-xs hover:shadow-md'
@@ -313,55 +313,58 @@ export const DrawerInteriorView: React.FC = () => {
                         >
                           {/* Top: Icon + Multiplier Pill + Favorite / Match Badge */}
                           <div className="flex items-start justify-between">
-                            <div className={`w-11 h-11 rounded-xl shadow-xs border flex items-center justify-center group-hover:scale-105 transition-transform flex-shrink-0 ${
+                            <div className={`w-14 h-14 sm:w-16 sm:h-16 rounded-2xl shadow-xs border flex items-center justify-center group-hover:scale-105 transition-transform flex-shrink-0 ${
                               isItemMatch ? 'bg-amber-100 border-amber-300 text-amber-900' : 'bg-white border-slate-200/80'
                             }`}>
                               {getItemVisualIcon(item)}
                             </div>
 
-                            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                            <div className="flex items-center gap-2 flex-wrap justify-end">
                               {isItemMatch && (
-                                <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white font-black text-[10px] shadow-xs flex items-center gap-1 animate-pulse">
-                                  <Zap className="w-2.5 h-2.5 fill-white" />
+                                <span className="px-2.5 py-1 rounded-full bg-amber-500 text-white font-black text-xs shadow-xs flex items-center gap-1 animate-pulse">
+                                  <Zap className="w-3 h-3 fill-white" />
                                   <span>MATCH</span>
                                 </span>
                               )}
                               {item.quantity > 1 && (
-                                <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-mono text-xs font-black">
+                                <span className="px-2.5 py-1 rounded-full bg-blue-100 text-blue-700 font-mono text-xs sm:text-sm font-black">
                                   ×{item.quantity}
                                 </span>
                               )}
                               <button
                                 onClick={(e) => handleToggleFavorite(item, e)}
-                                className="p-1 rounded-lg text-slate-300 hover:text-amber-500 transition-colors cursor-pointer"
+                                className="min-w-[38px] min-h-[38px] p-2 rounded-xl text-slate-300 hover:text-amber-500 hover:bg-amber-50 transition-colors cursor-pointer flex items-center justify-center"
+                                title="Favorite"
                               >
-                                <Star className={`w-4 h-4 ${item.favorite ? 'text-amber-500 fill-amber-500' : ''}`} />
+                                <Star className={`w-5 h-5 ${item.favorite ? 'text-amber-500 fill-amber-500' : ''}`} />
                               </button>
                             </div>
                           </div>
 
-                          {/* Middle: Clean Item Title (Zero text clutter) */}
+                          {/* Middle: Clean Item Title (Zero text clutter, readable font) */}
                           <div>
-                            <h4 className={`font-extrabold text-sm leading-snug line-clamp-2 ${
+                            <h4 className={`font-black text-base sm:text-lg leading-snug line-clamp-2 ${
                               isItemMatch ? 'text-amber-950 font-black' : 'text-slate-800 group-hover:text-blue-600'
                             }`}>
                               {item.name}
                             </h4>
                           </div>
 
-                          {/* Bottom Actions */}
-                          <div className="flex items-center justify-between pt-1 border-t border-slate-200/60 text-slate-400">
-                            <span className="text-[10px] font-semibold uppercase tracking-wider">
+                          {/* Bottom Actions: Substantial touch targets */}
+                          <div className="flex items-center justify-between pt-2 border-t border-slate-200/70 text-slate-400">
+                            <span className="text-xs font-bold uppercase tracking-wider text-slate-400 group-hover:text-slate-600">
                               Tap to edit
                             </span>
                             <div className="flex items-center gap-1">
-                              <Edit3 className="w-3.5 h-3.5 group-hover:text-blue-600" />
+                              <div className="min-w-[36px] min-h-[36px] flex items-center justify-center text-slate-400 group-hover:text-blue-600">
+                                <Edit3 className="w-4 h-4" />
+                              </div>
                               <button
                                 onClick={(e) => handleDeleteItem(item.id, e)}
-                                className="p-1 hover:text-rose-600 transition-colors"
+                                className="min-w-[38px] min-h-[38px] p-2 rounded-xl hover:text-rose-600 hover:bg-rose-50 transition-colors flex items-center justify-center"
                                 title="Delete Item"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                <Trash2 className="w-4 h-4" />
                               </button>
                             </div>
                           </div>
@@ -369,15 +372,15 @@ export const DrawerInteriorView: React.FC = () => {
                       );
                     })}
 
-                    {/* Quick "+ Add Item" Card */}
+                    {/* Quick "+ Add Item" Card (Bigger card) */}
                     <button
                       onClick={() => setItemModalOpen(true)}
-                      className="p-5 rounded-2xl border-2 border-dashed border-slate-300 hover:border-emerald-500 hover:bg-emerald-50/40 transition-all flex flex-col items-center justify-center gap-2 text-slate-400 hover:text-emerald-700 cursor-pointer min-h-[120px]"
+                      className="p-6 rounded-2xl sm:rounded-3xl border-2 border-dashed border-slate-300 hover:border-emerald-500 hover:bg-emerald-50/40 transition-all flex flex-col items-center justify-center gap-2.5 text-slate-400 hover:text-emerald-700 cursor-pointer min-h-[140px] sm:min-h-[160px]"
                     >
-                      <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400">
-                        <Plus className="w-5 h-5 stroke-[2.5]" />
+                      <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400 group-hover:text-emerald-600">
+                        <Plus className="w-7 h-7 stroke-[2.5]" />
                       </div>
-                      <span className="text-xs font-bold">New Item</span>
+                      <span className="text-sm sm:text-base font-extrabold">New Item</span>
                     </button>
                   </div>
                 )}
