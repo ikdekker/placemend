@@ -177,13 +177,13 @@ async function main() {
   console.log("Capturing 55_multi_doors_modal_blueprint.png...");
   await capture("55_multi_doors_modal_blueprint.png");
 
-  // 3. Save doors and view on floor canvas
-  console.log("Saving doors and viewing on Floor Canvas...");
+  // 3. Close modal via Done button (no manual save needed, auto-persisted!)
+  console.log("Closing modal via Done button (auto-persisted live)...");
   await send("Runtime.evaluate", {
     expression: `
       (() => {
-        const saveBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Save Doors'));
-        if (saveBtn) saveBtn.click();
+        const doneBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent && b.textContent.trim() === 'Done');
+        if (doneBtn) doneBtn.click();
       })()
     `
   });

@@ -357,17 +357,28 @@ export const RoomShapeModal: React.FC = () => {
     setRoomShapeModalOpen(false);
   };
 
+  // Live auto-save helper for doors
+  const persistDoors = async (newDoors: RoomDoor[]) => {
+    setDoorsList(newDoors);
+    if (room) {
+      await db.rooms.update(room.id, {
+        doors: newDoors,
+        door: newDoors[0] || undefined,
+        updatedAt: Date.now(),
+      });
+    }
+  };
+
   // Active selected door helper
   const selectedDoor = doorsList.find((d) => d.id === activeDoorId) || doorsList[0] || null;
 
-  const updateSelectedDoor = (patch: Partial<RoomDoor>) => {
+  const updateSelectedDoor = async (patch: Partial<RoomDoor>) => {
     if (!selectedDoor) return;
-    setDoorsList((prev) =>
-      prev.map((d) => (d.id === selectedDoor.id ? { ...d, ...patch } : d))
-    );
+    const updated = doorsList.map((d) => (d.id === selectedDoor.id ? { ...d, ...patch } : d));
+    await persistDoors(updated);
   };
 
-  const handleAddDoor = () => {
+  const handleAddDoor = async () => {
     const newId = `door-${Date.now()}`;
     const newIndex = doorsList.length + 1;
     const defaultWalls: WallSide[] = ['bottom', 'top', 'left', 'right'];
@@ -380,26 +391,17 @@ export const RoomShapeModal: React.FC = () => {
       swing: 'inward_left',
       width: 2,
     };
-    setDoorsList((prev) => [...prev, newDoor]);
+    const updated = [...doorsList, newDoor];
     setActiveDoorId(newId);
+    await persistDoors(updated);
   };
 
-  const handleDeleteDoor = (doorId: string) => {
+  const handleDeleteDoor = async (doorId: string) => {
     const remaining = doorsList.filter((d) => d.id !== doorId);
-    setDoorsList(remaining);
     if (activeDoorId === doorId) {
       setActiveDoorId(remaining.length > 0 ? (remaining[0].id || '') : '');
     }
-  };
-
-  // Save Door Configuration
-  const handleSaveDoor = async () => {
-    await db.rooms.update(room.id, {
-      doors: doorsList,
-      door: doorsList[0] || undefined,
-      updatedAt: Date.now(),
-    });
-    setRoomShapeModalOpen(false);
+    await persistDoors(remaining);
   };
 
   const maxDoorOffset = selectedDoor
@@ -725,11 +727,17 @@ export const RoomShapeModal: React.FC = () => {
               {/* Header description */}
               <div className="flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                    Room Doors & Entrances
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                      Room Doors & Entrances
+                    </span>
+                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full flex items-center gap-1 border border-emerald-200/60">
+                      <Check className="w-3 h-3 text-emerald-500" />
+                      Auto-saved
+                    </span>
+                  </div>
                   <p className="text-[11px] text-slate-400">
-                    Add, position, or configure multiple entrance or connecting doors
+                    Changes to walls, openings, and positions apply automatically
                   </p>
                 </div>
                 <button
@@ -1093,13 +1101,16 @@ export const RoomShapeModal: React.FC = () => {
                 </>
               )}
 
-              <div className="flex justify-end pt-2">
+              <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                <span className="text-xs text-emerald-600 font-bold flex items-center gap-1.5">
+                  <Check className="w-4 h-4 text-emerald-500" />
+                  <span>All door changes saved live</span>
+                </span>
                 <button
-                  onClick={handleSaveDoor}
-                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
+                  onClick={() => setRoomShapeModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition-all active:scale-95 cursor-pointer"
                 >
-                  <Check className="w-4 h-4" />
-                  <span>Save Doors ({doorsList.length})</span>
+                  Done
                 </button>
               </div>
             </div>
