@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
 import { Container, Item } from '../types';
+import { useVisualSearch } from '../hooks/useVisualSearch';
 import { 
   ArrowLeft, 
   Plus, 
@@ -17,7 +18,8 @@ import {
   Layers, 
   LayoutGrid, 
   ChevronRight,
-  SplitSquareVertical
+  SplitSquareVertical,
+  Zap
 } from 'lucide-react';
 
 export const DrawerInteriorView: React.FC = () => {
@@ -27,6 +29,8 @@ export const DrawerInteriorView: React.FC = () => {
     setSelectedContainerId,
     setItemModalOpen,
   } = useAppStore();
+
+  const { isSearching, matchingContainerIds, matchingItemIds, matchCountsByContainer } = useVisualSearch();
 
   const [isAddingCompartment, setIsAddingCompartment] = useState(false);
   const [newCompName, setNewCompName] = useState('');
@@ -145,7 +149,8 @@ export const DrawerInteriorView: React.FC = () => {
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs sm:text-sm transition-all cursor-pointer shadow-xs active:scale-95 flex-shrink-0"
           >
             <ArrowLeft className="w-4 h-4 text-blue-600 stroke-[2.5]" />
-            <span className="truncate max-w-[120px] sm:max-w-[160px]">{backLabel}</span>
+            <span className="sm:hidden">Back</span>
+            <span className="hidden sm:inline truncate max-w-[150px]">{backLabel}</span>
           </button>
 
           <div className="truncate min-w-0">
@@ -191,18 +196,30 @@ export const DrawerInteriorView: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 rounded-3xl bg-amber-50/60 border-4 border-amber-900/15 shadow-inner">
                 {childCompartments.map((comp) => {
                   const count = childItemCounts[comp.id] || 0;
+                  const isCompMatch = isSearching && matchingContainerIds.has(comp.id);
+                  const isCompDimmed = isSearching && !isCompMatch;
+                  const compMatchCount = matchCountsByContainer.get(comp.id) || 0;
+
                   return (
                     <div
                       key={comp.id}
                       onClick={() => setSelectedContainerId(comp.id)}
-                      className="p-4 rounded-2xl bg-white border-2 border-amber-200 hover:border-blue-500 shadow-sm hover:shadow-lg transition-all cursor-pointer flex items-center justify-between group active:scale-98"
+                      className={`p-4 rounded-2xl transition-all cursor-pointer flex items-center justify-between group active:scale-98 ${
+                        isCompMatch
+                          ? 'bg-amber-50/95 border-2 border-amber-400 ring-3 ring-amber-400 shadow-md scale-[1.01]'
+                          : 'bg-white border-2 border-amber-200 hover:border-blue-500 shadow-sm hover:shadow-lg'
+                      } ${isCompDimmed ? 'opacity-35 grayscale-[25%]' : 'opacity-100'}`}
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="p-2.5 rounded-xl bg-purple-50 text-purple-600 flex-shrink-0">
+                        <div className={`p-2.5 rounded-xl flex-shrink-0 ${
+                          isCompMatch ? 'bg-amber-100 text-amber-800' : 'bg-purple-50 text-purple-600'
+                        }`}>
                           <LayoutGrid className="w-5 h-5" />
                         </div>
                         <div className="truncate min-w-0">
-                          <h3 className="font-extrabold text-sm text-slate-800 group-hover:text-blue-600 truncate">
+                          <h3 className={`font-extrabold text-sm truncate ${
+                            isCompMatch ? 'text-amber-950 font-black' : 'text-slate-800 group-hover:text-blue-600'
+                          }`}>
                             {comp.name}
                           </h3>
                           <span className="text-[11px] font-semibold text-slate-400">
@@ -211,8 +228,18 @@ export const DrawerInteriorView: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="w-7 h-7 rounded-xl bg-slate-100 group-hover:bg-blue-600 group-hover:text-white flex items-center justify-center transition-colors text-slate-400 flex-shrink-0">
-                        <ChevronRight className="w-4 h-4 stroke-[2.5]" />
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {isCompMatch && (
+                          <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white font-extrabold text-[10px] shadow-xs flex items-center gap-1 animate-pulse">
+                            <span>⚡</span>
+                            <span>{compMatchCount} {compMatchCount === 1 ? 'match' : 'matches'}</span>
+                          </span>
+                        )}
+                        <div className={`w-7 h-7 rounded-xl flex items-center justify-center transition-colors text-slate-400 flex-shrink-0 ${
+                          isCompMatch ? 'bg-amber-500 text-white' : 'bg-slate-100 group-hover:bg-blue-600 group-hover:text-white'
+                        }`}>
+                          <ChevronRight className="w-4 h-4 stroke-[2.5]" />
+                        </div>
                       </div>
                     </div>
                   );
@@ -260,58 +287,87 @@ export const DrawerInteriorView: React.FC = () => {
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {items.map((item) => (
-                      <div
-                        key={item.id}
-                        onClick={() => setItemModalOpen(true, item.id)}
-                        className="relative p-3.5 rounded-2xl bg-slate-50/80 hover:bg-white border-2 border-slate-200 hover:border-blue-400 shadow-xs hover:shadow-md transition-all cursor-pointer flex flex-col justify-between gap-3 group active:scale-98"
-                      >
-                        {/* Top: Icon + Multiplier Pill + Favorite */}
-                        <div className="flex items-start justify-between">
-                          <div className="w-11 h-11 rounded-xl bg-white shadow-xs border border-slate-200/80 flex items-center justify-center group-hover:scale-105 transition-transform flex-shrink-0">
-                            {getItemVisualIcon(item)}
+                    {[...items]
+                      .sort((a, b) => {
+                        if (isSearching) {
+                          const aMatch = matchingItemIds.has(a.id);
+                          const bMatch = matchingItemIds.has(b.id);
+                          if (aMatch && !bMatch) return -1;
+                          if (!aMatch && bMatch) return 1;
+                        }
+                        return 0;
+                      })
+                      .map((item) => {
+                        const isItemMatch = isSearching && matchingItemIds.has(item.id);
+                        const isItemDimmed = isSearching && !isItemMatch;
+
+                      return (
+                        <div
+                          key={item.id}
+                          onClick={() => setItemModalOpen(true, item.id)}
+                          className={`relative p-3.5 rounded-2xl transition-all cursor-pointer flex flex-col justify-between gap-3 group active:scale-98 ${
+                            isItemMatch
+                              ? 'bg-amber-50/95 border-2 border-amber-400 ring-4 ring-amber-400 shadow-xl shadow-amber-400/30 scale-[1.02] z-10'
+                              : 'bg-slate-50/80 hover:bg-white border-2 border-slate-200 hover:border-blue-400 shadow-xs hover:shadow-md'
+                          } ${isItemDimmed ? 'opacity-35 grayscale-[25%]' : 'opacity-100'}`}
+                        >
+                          {/* Top: Icon + Multiplier Pill + Favorite / Match Badge */}
+                          <div className="flex items-start justify-between">
+                            <div className={`w-11 h-11 rounded-xl shadow-xs border flex items-center justify-center group-hover:scale-105 transition-transform flex-shrink-0 ${
+                              isItemMatch ? 'bg-amber-100 border-amber-300 text-amber-900' : 'bg-white border-slate-200/80'
+                            }`}>
+                              {getItemVisualIcon(item)}
+                            </div>
+
+                            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                              {isItemMatch && (
+                                <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white font-black text-[10px] shadow-xs flex items-center gap-1 animate-pulse">
+                                  <Zap className="w-2.5 h-2.5 fill-white" />
+                                  <span>MATCH</span>
+                                </span>
+                              )}
+                              {item.quantity > 1 && (
+                                <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-mono text-xs font-black">
+                                  ×{item.quantity}
+                                </span>
+                              )}
+                              <button
+                                onClick={(e) => handleToggleFavorite(item, e)}
+                                className="p-1 rounded-lg text-slate-300 hover:text-amber-500 transition-colors cursor-pointer"
+                              >
+                                <Star className={`w-4 h-4 ${item.favorite ? 'text-amber-500 fill-amber-500' : ''}`} />
+                              </button>
+                            </div>
                           </div>
 
-                          <div className="flex items-center gap-1.5">
-                            {item.quantity > 1 && (
-                              <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-mono text-xs font-black">
-                                ×{item.quantity}
-                              </span>
-                            )}
-                            <button
-                              onClick={(e) => handleToggleFavorite(item, e)}
-                              className="p-1 rounded-lg text-slate-300 hover:text-amber-500 transition-colors cursor-pointer"
-                            >
-                              <Star className={`w-4 h-4 ${item.favorite ? 'text-amber-500 fill-amber-500' : ''}`} />
-                            </button>
+                          {/* Middle: Clean Item Title (Zero text clutter) */}
+                          <div>
+                            <h4 className={`font-extrabold text-sm leading-snug line-clamp-2 ${
+                              isItemMatch ? 'text-amber-950 font-black' : 'text-slate-800 group-hover:text-blue-600'
+                            }`}>
+                              {item.name}
+                            </h4>
+                          </div>
+
+                          {/* Bottom Actions */}
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-200/60 text-slate-400">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider">
+                              Tap to edit
+                            </span>
+                            <div className="flex items-center gap-1">
+                              <Edit3 className="w-3.5 h-3.5 group-hover:text-blue-600" />
+                              <button
+                                onClick={(e) => handleDeleteItem(item.id, e)}
+                                className="p-1 hover:text-rose-600 transition-colors"
+                                title="Delete Item"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </div>
                         </div>
-
-                        {/* Middle: Clean Item Title (Zero text clutter) */}
-                        <div>
-                          <h4 className="font-extrabold text-sm text-slate-800 group-hover:text-blue-600 leading-snug line-clamp-2">
-                            {item.name}
-                          </h4>
-                        </div>
-
-                        {/* Bottom Actions */}
-                        <div className="flex items-center justify-between pt-1 border-t border-slate-200/60 text-slate-400">
-                          <span className="text-[10px] font-semibold uppercase tracking-wider">
-                            Tap to edit
-                          </span>
-                          <div className="flex items-center gap-1">
-                            <Edit3 className="w-3.5 h-3.5 group-hover:text-blue-600" />
-                            <button
-                              onClick={(e) => handleDeleteItem(item.id, e)}
-                              className="p-1 hover:text-rose-600 transition-colors"
-                              title="Delete Item"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
 
                     {/* Quick "+ Add Item" Card */}
                     <button

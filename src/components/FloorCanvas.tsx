@@ -4,6 +4,7 @@ import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
 import { Point2D } from '../types';
 import { FurnitureGraphic } from './FurnitureGraphic';
+import { useVisualSearch } from '../hooks/useVisualSearch';
 import { 
   RotateCw, 
   Trash2, 
@@ -11,7 +12,8 @@ import {
   Eye, 
   Pentagon,
   Maximize2,
-  Sliders
+  Sliders,
+  Sparkles
 } from 'lucide-react';
 
 export const FloorCanvas: React.FC = () => {
@@ -21,6 +23,7 @@ export const FloorCanvas: React.FC = () => {
     selectedFurnitureId,
     highlightedFurnitureId,
     setSelectedFurnitureId,
+    setSelectedRoomId,
     setRoomShapeModalOpen,
     zoom,
     setZoom,
@@ -33,11 +36,13 @@ export const FloorCanvas: React.FC = () => {
     toggleShowLabels,
   } = useAppStore();
 
+  const { isSearching, matchingFurnitureIds, matchCountsByFurniture, matchingRoomIds } = useVisualSearch();
+
   const containerRef = useRef<HTMLDivElement>(null);
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
 
-  // Touch state for 2-finger pinch-to-zoom & two-finger pan
+  // Touch state for 2-finger pinch-to-zoom
   const touchState = useRef<{
     initialDist: number;
     initialZoom: number;
@@ -49,6 +54,15 @@ export const FloorCanvas: React.FC = () => {
     initialMidpoint: { x: 0, y: 0 },
     initialPan: { x: 0, y: 0 },
   });
+
+  // Track pointer/touch start to distinguish 1-finger pan from a stationary tap
+  const pointerDownPos = useRef<{ x: number; y: number; time: number; targetFurnitureId: string | null }>({
+    x: 0,
+    y: 0,
+    time: 0,
+    targetFurnitureId: null,
+  });
+  const hasDragged = useRef(false);
 
   // Dragging / Moving Furniture (Only enabled in Edit Mode)
   const [draggingFurnitureId, setDraggingFurnitureId] = useState<string | null>(null);
@@ -86,6 +100,13 @@ export const FloorCanvas: React.FC = () => {
     });
     return counts;
   }, [furnitureList]) || {};
+
+  // Check if matches exist in other rooms when active room has 0 matches
+  const otherRoomsWithMatches = useLiveQuery(async () => {
+    if (!isSearching || matchingRoomIds.size === 0) return [];
+    const allRooms = await db.rooms.toArray();
+    return allRooms.filter((r) => r.id !== selectedRoomId && matchingRoomIds.has(r.id));
+  }, [isSearching, matchingRoomIds, selectedRoomId]) || [];
 
   const unitSize = room?.unitSize || 32;
   const gridW = room?.gridWidth || 26;
@@ -141,29 +162,56 @@ export const FloorCanvas: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, [fitRoomToViewport]);
 
-  // In View Mode: Canvas is static. Only in Edit Mode or when explicitly dragging can pan happen.
+  // 1-Finger Navigation & Touch Panning across the room
   const handlePointerDown = (clientX: number, clientY: number, target: EventTarget) => {
-    // If clicking background in view mode, simply deselect furniture without panning
-    if (appMode === 'view') {
+    const targetEl = target as HTMLElement;
+    const furnEl = targetEl && typeof targetEl.closest === 'function' ? targetEl.closest('[data-furniture-id]') : null;
+    const furnId = furnEl ? furnEl.getAttribute('data-furniture-id') : null;
+
+    pointerDownPos.current = {
+      x: clientX,
+      y: clientY,
+      time: Date.now(),
+      targetFurnitureId: furnId,
+    };
+    hasDragged.current = false;
+
+    // In Edit Mode: if clicking furniture, handle moving that furniture piece
+    if (appMode === 'edit') {
+      if (furnId) {
+        setSelectedFurnitureId(furnId);
+        setDraggingFurnitureId(furnId);
+        const furn = furnitureList.find((f) => f.id === furnId);
+        if (furn) {
+          setDragStartPos({
+            mouseX: clientX,
+            mouseY: clientY,
+            origX: furn.position.x,
+            origY: furn.position.y,
+          });
+        }
+        return;
+      }
+      // In Edit Mode clicking blank canvas: allow canvas panning
+      setIsPanning(true);
+      setPanStart({ x: clientX - panOffset.x, y: clientY - panOffset.y });
       setSelectedFurnitureId(null);
       return;
     }
 
-    // In Edit Mode: allow canvas panning when clicking blank canvas
-    if (
-      target === containerRef.current || 
-      (target as HTMLElement).classList.contains('canvas-bg') ||
-      (target as HTMLElement).tagName === 'svg' ||
-      (target as HTMLElement).tagName === 'rect'
-    ) {
-      setIsPanning(true);
-      setPanStart({ x: clientX - panOffset.x, y: clientY - panOffset.y });
-      setSelectedFurnitureId(null);
-    }
+    // In View Mode: 1-Finger Panning across the entire room!
+    setIsPanning(true);
+    setPanStart({ x: clientX - panOffset.x, y: clientY - panOffset.y });
   };
 
   const handlePointerMove = (clientX: number, clientY: number) => {
-    if (isPanning && appMode === 'edit') {
+    const dist = Math.hypot(clientX - pointerDownPos.current.x, clientY - pointerDownPos.current.y);
+    if (dist > 5) {
+      hasDragged.current = true;
+    }
+
+    // 1-Finger Room Movement
+    if (isPanning) {
       setPanOffset({
         x: clientX - panStart.x,
         y: clientY - panStart.y,
@@ -226,6 +274,22 @@ export const FloorCanvas: React.FC = () => {
   };
 
   const handlePointerUp = () => {
+    // If the finger was stationary (< 5px movement), it's a clean TAP:
+    if (!hasDragged.current) {
+      if (pointerDownPos.current.targetFurnitureId) {
+        // Tapped a furniture piece -> Open that furniture
+        setSelectedFurnitureId(pointerDownPos.current.targetFurnitureId);
+      } else if (appMode === 'view') {
+        // Tapped empty room floor in View Mode -> Deselect
+        setSelectedFurnitureId(null);
+      }
+    }
+
+    // Reset hasDragged after gesture completes so subsequent clicks are clean
+    setTimeout(() => {
+      hasDragged.current = false;
+    }, 50);
+
     setIsPanning(false);
     setDraggingFurnitureId(null);
     setResizingFurnitureId(null);
@@ -354,10 +418,26 @@ export const FloorCanvas: React.FC = () => {
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
-      className={`relative flex-1 w-full h-full bg-slate-200/80 overflow-hidden select-none touch-none ${
-        appMode === 'edit' ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'
-      }`}
+      className="relative flex-1 w-full h-full bg-slate-200/80 overflow-hidden select-none touch-none cursor-grab active:cursor-grabbing"
     >
+      {/* Other Room Matches Banner */}
+      {isSearching && otherRoomsWithMatches.length > 0 && furnitureList.every((f) => !matchingFurnitureIds.has(f.id)) && (
+        <div className="absolute top-3 sm:top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-amber-500 text-white px-3.5 py-1.5 rounded-2xl shadow-xl text-xs font-bold animate-in fade-in slide-in-from-top-2">
+          <span>⚡ Matches found in other rooms:</span>
+          <div className="flex items-center gap-1.5">
+            {otherRoomsWithMatches.map((otherRoom) => (
+              <button
+                key={otherRoom.id}
+                onClick={() => setSelectedRoomId(otherRoom.id)}
+                className="px-2.5 py-0.5 rounded-xl bg-white text-amber-800 font-extrabold hover:bg-amber-50 cursor-pointer shadow-xs transition-all active:scale-95"
+              >
+                Go to {otherRoom.name} →
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Clean Edit Toolbar (Only visible when user actively enters Edit Mode) */}
       {appMode === 'edit' && (
         <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20 flex items-center gap-1.5 bg-white/95 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-slate-200 shadow-md text-slate-700">
@@ -556,6 +636,9 @@ export const FloorCanvas: React.FC = () => {
           {furnitureList.map((furn) => {
             const isSelected = furn.id === selectedFurnitureId;
             const isHighlighted = furn.id === highlightedFurnitureId;
+            const isSearchMatch = isSearching && matchingFurnitureIds.has(furn.id);
+            const isSearchDimmed = isSearching && !isSearchMatch;
+            const searchCount = matchCountsByFurniture.get(furn.id) || 0;
             const itemCount = itemCountsByFurniture[furn.id] || 0;
 
             const isRotated = furn.position.rotation % 180 !== 0;
@@ -571,6 +654,8 @@ export const FloorCanvas: React.FC = () => {
                 data-furniture-id={furn.id}
                 onClick={(e) => {
                   e.stopPropagation();
+                  // If user dragged to pan across the room, do NOT open the furniture!
+                  if (hasDragged.current) return;
                   setSelectedFurnitureId(furn.id);
                 }}
                 onMouseDown={(e) => {
@@ -605,9 +690,11 @@ export const FloorCanvas: React.FC = () => {
                   width: `${w}px`,
                   height: `${l}px`,
                 }}
-                className={`absolute select-none transition-transform duration-100 ${
-                  appMode === 'edit' ? 'cursor-move' : 'cursor-pointer hover:scale-[1.015] active:scale-[0.98]'
-                } ${isSelected ? 'z-20' : 'z-10'}`}
+                className={`absolute select-none transition-all duration-200 ${
+                  appMode === 'edit' ? 'cursor-move' : 'cursor-pointer hover:scale-[1.02] active:scale-[0.98]'
+                } ${isSelected ? 'z-20' : isSearchMatch ? 'z-25 scale-[1.02]' : 'z-10'} ${
+                  isSearchDimmed ? 'opacity-30 grayscale-[35%]' : 'opacity-100'
+                }`}
               >
                 {/* Rich Top-Down Architectural Furniture Graphic */}
                 <FurnitureGraphic
@@ -619,12 +706,24 @@ export const FloorCanvas: React.FC = () => {
                   rotation={furn.position.rotation}
                   itemCount={itemCount}
                   isSelected={isSelected}
-                  isHighlighted={isHighlighted}
+                  isHighlighted={isHighlighted || isSearchMatch}
                   showLabels={showLabels}
                 />
 
-                {/* Visual Locator Pulse Beacon for Search Match */}
-                {isHighlighted && (
+                {/* Visual Glowing Pulse Beacon & Floating Match Badge */}
+                {isSearchMatch && (
+                  <>
+                    <span className="absolute -inset-3 rounded-2xl bg-amber-400/50 animate-ping pointer-events-none" />
+                    <span className="absolute -inset-1 rounded-xl ring-4 ring-amber-400 shadow-2xl shadow-amber-400/60 pointer-events-none" />
+                    <div className="absolute -top-7 left-1/2 -translate-x-1/2 z-30 pointer-events-none whitespace-nowrap px-2.5 py-0.5 rounded-full bg-amber-500 text-white font-extrabold text-[11px] shadow-lg shadow-amber-500/50 flex items-center gap-1 animate-bounce">
+                      <span>⚡</span>
+                      <span>{searchCount} {searchCount === 1 ? 'match' : 'matches'}</span>
+                    </div>
+                  </>
+                )}
+
+                {/* Visual Locator Pulse Beacon for Manual Highlight */}
+                {isHighlighted && !isSearchMatch && (
                   <span className="absolute -inset-2.5 rounded-xl bg-amber-400/60 animate-ping pointer-events-none" />
                 )}
 

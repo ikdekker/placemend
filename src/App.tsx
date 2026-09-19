@@ -4,7 +4,6 @@ import { FloorCanvas } from './components/FloorCanvas';
 import { PhysicalFurnitureView } from './components/PhysicalFurnitureView';
 import { DrawerInteriorView } from './components/DrawerInteriorView';
 import { ItemModal } from './components/ItemModal';
-import { SearchModal } from './components/SearchModal';
 import { FurnitureLibrary } from './components/FurnitureLibrary';
 import { RoomManagerModal } from './components/RoomManagerModal';
 import { RoomShapeModal } from './components/RoomShapeModal';
@@ -41,7 +40,6 @@ export function App() {
       <MobileNav />
 
       {/* Modals */}
-      <SearchModal />
       <ItemModal />
       <FurnitureLibrary />
       <RoomManagerModal />

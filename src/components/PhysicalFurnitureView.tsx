@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
 import { Container } from '../types';
+import { useVisualSearch } from '../hooks/useVisualSearch';
 import { 
   ArrowLeft, 
   Plus, 
@@ -25,6 +26,8 @@ export const PhysicalFurnitureView: React.FC = () => {
     setSelectedContainerId,
     setItemModalOpen,
   } = useAppStore();
+
+  const { isSearching, matchingContainerIds, matchingItemIds, matchCountsByContainer } = useVisualSearch();
 
   const [showAllItems, setShowAllItems] = useState(false);
   const [isAddingSlot, setIsAddingSlot] = useState(false);
@@ -149,19 +152,33 @@ export const PhysicalFurnitureView: React.FC = () => {
             ) : (
               allItems.map((item) => {
                 const container = containers.find((c) => c.id === item.containerId);
+                const isItemMatch = isSearching && matchingItemIds.has(item.id);
+                const isItemDimmed = isSearching && !isItemMatch;
+
                 return (
                   <div
                     key={item.id}
                     onClick={() => setItemModalOpen(true, item.id)}
-                    className="p-3.5 rounded-2xl bg-white border border-slate-200 hover:border-blue-400 shadow-xs flex items-center justify-between transition-all cursor-pointer group hover:shadow-md"
+                    className={`p-3.5 rounded-2xl transition-all cursor-pointer group flex items-center justify-between ${
+                      isItemMatch
+                        ? 'bg-amber-50/90 border-2 border-amber-400 ring-3 ring-amber-400 shadow-md scale-[1.01]'
+                        : 'bg-white border border-slate-200 hover:border-blue-400 shadow-xs hover:shadow-md'
+                    } ${isItemDimmed ? 'opacity-35 grayscale-[25%]' : 'opacity-100'}`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold flex-shrink-0">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold flex-shrink-0 ${
+                        isItemMatch ? 'bg-amber-500 text-white' : 'bg-blue-50 text-blue-600'
+                      }`}>
                         {item.quantity > 1 ? `×${item.quantity}` : '1'}
                       </div>
                       <div className="truncate min-w-0">
-                        <div className="font-bold text-sm text-slate-900 group-hover:text-blue-600 truncate">
-                          {item.name}
+                        <div className="font-bold text-sm text-slate-900 group-hover:text-blue-600 truncate flex items-center gap-2">
+                          <span>{item.name}</span>
+                          {isItemMatch && (
+                            <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-black animate-pulse">
+                              ⚡ MATCH
+                            </span>
+                          )}
                         </div>
                         {container && (
                           <div className="text-xs text-slate-400 font-medium truncate flex items-center gap-1">
@@ -217,6 +234,10 @@ export const PhysicalFurnitureView: React.FC = () => {
                   const childCount = children.reduce((acc, c) => acc + (itemCountMap.get(c.id) || 0), 0);
                   const totalCount = directCount + childCount;
 
+                  const isMatch = isSearching && matchingContainerIds.has(container.id);
+                  const isDimmed = isSearching && !isMatch;
+                  const matchCount = matchCountsByContainer.get(container.id) || 0;
+
                   const isDrawer = container.type === 'drawer';
                   const isBox = container.type === 'box' || container.type === 'bin';
 
@@ -224,18 +245,22 @@ export const PhysicalFurnitureView: React.FC = () => {
                     <div
                       key={container.id}
                       onClick={() => setSelectedContainerId(container.id)}
-                      className={`relative rounded-2xl p-4 sm:p-5 transition-all duration-150 cursor-pointer shadow-md hover:shadow-xl hover:scale-[1.01] active:scale-[0.99] flex items-center justify-between group ${
-                        isDrawer
-                          ? 'bg-gradient-to-b from-white to-slate-50 border-2 border-slate-300 hover:border-blue-500'
+                      className={`relative rounded-2xl p-4 sm:p-5 transition-all duration-200 cursor-pointer shadow-md flex items-center justify-between group ${
+                        isMatch
+                          ? 'ring-3 ring-amber-400 bg-amber-50/95 shadow-xl shadow-amber-300/40 border-2 border-amber-400 scale-[1.01]'
+                          : isDrawer
+                          ? 'bg-gradient-to-b from-white to-slate-50 border-2 border-slate-300 hover:border-blue-500 hover:shadow-xl hover:scale-[1.01]'
                           : isBox
-                          ? 'bg-gradient-to-b from-amber-50 to-amber-100/70 border-2 border-amber-300 hover:border-amber-500'
-                          : 'bg-white border-2 border-slate-200 hover:border-emerald-500'
-                      }`}
+                          ? 'bg-gradient-to-b from-amber-50 to-amber-100/70 border-2 border-amber-300 hover:border-amber-500 hover:shadow-xl hover:scale-[1.01]'
+                          : 'bg-white border-2 border-slate-200 hover:border-emerald-500 hover:shadow-xl hover:scale-[1.01]'
+                      } ${isDimmed ? 'opacity-35 grayscale-[25%]' : 'opacity-100'} active:scale-[0.99]`}
                     >
                       {/* Tactile Drawer Handle (if drawer) */}
                       {isDrawer && (
                         <div className="absolute top-1.5 inset-x-0 flex justify-center pointer-events-none">
-                          <div className="w-16 h-1.5 rounded-full bg-slate-300 group-hover:bg-blue-400 transition-colors shadow-inner" />
+                          <div className={`w-16 h-1.5 rounded-full transition-colors shadow-inner ${
+                            isMatch ? 'bg-amber-400' : 'bg-slate-300 group-hover:bg-blue-400'
+                          }`} />
                         </div>
                       )}
 
@@ -248,11 +273,15 @@ export const PhysicalFurnitureView: React.FC = () => {
 
                       {/* Section Name & Icon */}
                       <div className="flex items-center gap-3.5 min-w-0">
-                        <div className="p-2.5 rounded-xl bg-slate-100/80 group-hover:bg-blue-50 transition-colors flex-shrink-0">
+                        <div className={`p-2.5 rounded-xl transition-colors flex-shrink-0 ${
+                          isMatch ? 'bg-amber-100 text-amber-800' : 'bg-slate-100/80 group-hover:bg-blue-50'
+                        }`}>
                           {getSlotIcon(container.type)}
                         </div>
                         <div className="truncate min-w-0">
-                          <h3 className="font-extrabold text-sm sm:text-base text-slate-800 group-hover:text-blue-600 transition-colors truncate">
+                          <h3 className={`font-extrabold text-sm sm:text-base transition-colors truncate ${
+                            isMatch ? 'text-amber-950 font-black' : 'text-slate-800 group-hover:text-blue-600'
+                          }`}>
                             {container.name}
                           </h3>
                           <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
@@ -264,8 +293,13 @@ export const PhysicalFurnitureView: React.FC = () => {
                       </div>
 
                       {/* Count Badge & Chevron */}
-                      <div className="flex items-center gap-2.5 flex-shrink-0">
-                        {totalCount > 0 ? (
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {isMatch ? (
+                          <span className="px-2.5 py-1 rounded-full bg-amber-500 text-white font-extrabold text-xs shadow-xs flex items-center gap-1 animate-pulse">
+                            <span>⚡</span>
+                            <span>{matchCount} {matchCount === 1 ? 'match' : 'matches'}</span>
+                          </span>
+                        ) : totalCount > 0 ? (
                           <span className="px-2.5 py-1 rounded-full bg-slate-900 text-white font-mono text-xs font-black shadow-xs">
                             {totalCount} {totalCount === 1 ? 'item' : 'items'}
                           </span>
@@ -274,7 +308,9 @@ export const PhysicalFurnitureView: React.FC = () => {
                             Empty
                           </span>
                         )}
-                        <div className="w-7 h-7 rounded-xl bg-slate-100 group-hover:bg-blue-600 group-hover:text-white flex items-center justify-center transition-all text-slate-400">
+                        <div className={`w-7 h-7 rounded-xl flex items-center justify-center transition-all ${
+                          isMatch ? 'bg-amber-500 text-white' : 'bg-slate-100 group-hover:bg-blue-600 group-hover:text-white text-slate-400'
+                        }`}>
                           <ChevronRight className="w-4 h-4 stroke-[2.5]" />
                         </div>
                       </div>

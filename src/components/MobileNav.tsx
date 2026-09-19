@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAppStore } from '../store/useAppStore';
+import { useVisualSearch } from '../hooks/useVisualSearch';
 import { 
   Search, 
   Layers, 
@@ -7,30 +8,40 @@ import {
   SlidersHorizontal, 
   Eye, 
   Edit3,
-  Maximize2
+  Maximize2,
+  Zap
 } from 'lucide-react';
 
 export const MobileNav: React.FC = () => {
   const {
     appMode,
     setAppMode,
+    isSearchOpen,
     setSearchOpen,
     setFurnitureLibraryOpen,
     setRoomManagerOpen,
     resetView,
   } = useAppStore();
 
+  const { isSearching, totalMatches } = useVisualSearch();
+
   return (
     <div className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 px-1 py-1.5 flex items-center justify-between shadow-lg select-none pb-[max(env(safe-area-inset-bottom),6px)]">
       {/* Search */}
       <button
-        onClick={() => setSearchOpen(true)}
-        className="flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 text-slate-600 hover:text-blue-600 transition-colors cursor-pointer py-0.5"
+        onClick={() => setSearchOpen(!isSearchOpen)}
+        className={`flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer py-0.5 ${
+          isSearching ? 'text-amber-600' : 'text-slate-600 hover:text-blue-600'
+        }`}
       >
-        <div className="p-1.5 rounded-xl bg-slate-100">
-          <Search className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
+        <div className={`p-1.5 rounded-xl transition-colors ${
+          isSearching ? 'bg-amber-500 text-white shadow-xs' : 'bg-slate-100'
+        }`}>
+          {isSearching ? <Zap className="w-4 h-4 sm:w-5 sm:h-5 fill-white" /> : <Search className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />}
         </div>
-        <span className="text-[10px] font-bold truncate">Search</span>
+        <span className="text-[10px] font-bold truncate">
+          {isSearching ? `${totalMatches} matches` : 'Search'}
+        </span>
       </button>
 
       {/* View / Edit Mode Toggle */}

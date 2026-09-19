@@ -54,6 +54,7 @@ export interface AppState {
   setFurnitureLibraryOpen: (open: boolean) => void;
   setBackupModalOpen: (open: boolean) => void;
   setSearchQuery: (query: string) => void;
+  clearSearch: () => void;
 
   // Jump to specific furniture item (e.g. from search)
   locateFurniture: (roomId: string, furnitureId: string, containerId?: string | null) => void;
@@ -119,6 +120,7 @@ export const useAppStore = create<AppState>((set) => ({
   setFurnitureLibraryOpen: (open) => set({ isFurnitureLibraryOpen: open }),
   setBackupModalOpen: (open) => set({ isBackupModalOpen: open }),
   setSearchQuery: (query) => set({ searchQuery: query }),
+  clearSearch: () => set({ searchQuery: '', isSearchOpen: false }),
 
   locateFurniture: (roomId, furnitureId, containerId = null) => {
     set({
