@@ -13,8 +13,10 @@ import {
   Pentagon,
   Maximize2,
   Sliders,
-  Sparkles
+  Sparkles,
+  DoorOpen
 } from 'lucide-react';
+import { rotateRoom90Clockwise, getDoorSvgGeometry, nudgeDoor } from '../utils/roomGeometry';
 
 export const FloorCanvas: React.FC = () => {
   const {
@@ -74,6 +76,15 @@ export const FloorCanvas: React.FC = () => {
   const [resizeStart, setResizeStart] = useState({ mouseX: 0, mouseY: 0, origW: 0, origL: 0 });
   const [resizeLiveDim, setResizeLiveDim] = useState<{ id: string; w: number; l: number } | null>(null);
 
+  // Door dragging state (Only enabled in Edit Mode)
+  const [isDraggingDoor, setIsDraggingDoor] = useState(false);
+  const [doorDragStart, setDoorDragStart] = useState<{ mouseX: number; mouseY: number; origOffset: number }>({
+    mouseX: 0,
+    mouseY: 0,
+    origOffset: 0,
+  });
+  const [doorLiveOffset, setDoorLiveOffset] = useState<number | null>(null);
+
   const room = useLiveQuery(async () => {
     if (!selectedRoomId) return undefined;
     return await db.rooms.get(selectedRoomId);
@@ -113,6 +124,13 @@ export const FloorCanvas: React.FC = () => {
   const unitSize = room?.unitSize || 32;
   const gridW = room?.gridWidth || 26;
   const gridH = room?.gridHeight || 18;
+
+  const activeDoor = room ? {
+    ...(room.door || { wall: 'bottom' as const, offset: 2, swing: 'inward_left' as const, width: 2 }),
+    offset: doorLiveOffset !== null ? doorLiveOffset : (room.door?.offset ?? 2),
+  } : undefined;
+
+  const doorGeo = room && activeDoor ? getDoorSvgGeometry(activeDoor, gridW, gridH, unitSize) : null;
 
   // Auto-fit room to viewport (statically locks and centers the room)
   const fitRoomToViewport = useCallback(() => {
@@ -226,6 +244,23 @@ export const FloorCanvas: React.FC = () => {
       return;
     }
 
+    // Moving door in Edit Mode
+    if (isDraggingDoor && appMode === 'edit' && room) {
+      const curDoor = room.door || { wall: 'bottom', offset: 2, swing: 'inward_left', width: 2 };
+      const isHorizontal = curDoor.wall === 'top' || curDoor.wall === 'bottom';
+      const deltaPx = isHorizontal ? (clientX - doorDragStart.mouseX) : (clientY - doorDragStart.mouseY);
+      const deltaUnits = deltaPx / (unitSize * zoom);
+      let newOffset = doorDragStart.origOffset + deltaUnits;
+      if (gridSnap) {
+        newOffset = Math.round(newOffset);
+      }
+      const widthUnits = curDoor.width || 2;
+      const maxOffset = isHorizontal ? Math.max(0, gridW - widthUnits) : Math.max(0, gridH - widthUnits);
+      newOffset = Math.max(0, Math.min(maxOffset, newOffset));
+      setDoorLiveOffset(newOffset);
+      return;
+    }
+
     // Moving furniture in Edit Mode
     if (draggingFurnitureId && appMode === 'edit') {
       const dx = (clientX - dragStartPos.mouseX) / (unitSize * zoom);
@@ -280,7 +315,35 @@ export const FloorCanvas: React.FC = () => {
     }
   };
 
+  const handleDoorDragStart = (e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+    setIsDraggingDoor(true);
+    const curDoor = room?.door || { wall: 'bottom', offset: 2, swing: 'inward_left', width: 2 };
+    setDoorDragStart({
+      mouseX: clientX,
+      mouseY: clientY,
+      origOffset: curDoor.offset,
+    });
+    setDoorLiveOffset(curDoor.offset);
+  };
+
   const handlePointerUp = () => {
+    // If dragging door, commit the new offset to DB
+    if (isDraggingDoor && doorLiveOffset !== null && room) {
+      const curDoor = room.door || { wall: 'bottom', offset: 2, swing: 'inward_left', width: 2 };
+      db.rooms.update(room.id, {
+        door: {
+          ...curDoor,
+          offset: doorLiveOffset,
+        },
+        updatedAt: Date.now(),
+      });
+      setIsDraggingDoor(false);
+      setDoorLiveOffset(null);
+    }
+
     // If dragging furniture, commit the new position to DB
     if (draggingFurnitureId && dragLivePos && dragLivePos.id === draggingFurnitureId) {
       db.furniture.update(draggingFurnitureId, {
@@ -489,12 +552,33 @@ export const FloorCanvas: React.FC = () => {
       {appMode === 'edit' && (
         <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20 flex items-center gap-1.5 bg-white/95 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-slate-200 shadow-md text-slate-700">
           <button
-            onClick={() => setRoomShapeModalOpen(true)}
+            onClick={() => setRoomShapeModalOpen(true, 'presets')}
             className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer"
             title="Configure Room Walls & Shape"
           >
             <Pentagon className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Room Shape</span>
+          </button>
+          <button
+            onClick={() => setRoomShapeModalOpen(true, 'door')}
+            className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-amber-700 hover:bg-amber-50 transition-colors cursor-pointer"
+            title="Configure Entrance Door"
+          >
+            <DoorOpen className="w-3.5 h-3.5 text-amber-600" />
+            <span className="hidden sm:inline">Door</span>
+          </button>
+          <button
+            onClick={async () => {
+              if (room) {
+                await rotateRoom90Clockwise(room.id);
+                fitRoomToViewport();
+              }
+            }}
+            className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+            title="Rotate Room 90° Clockwise"
+          >
+            <RotateCw className="w-3.5 h-3.5 text-blue-600" />
+            <span className="hidden sm:inline">Rotate 90°</span>
           </button>
           <div className="w-px h-4 bg-slate-200" />
           <button
@@ -622,17 +706,17 @@ export const FloorCanvas: React.FC = () => {
             </pattern>
             <rect width="100%" height="100%" fill="url(#subtle-grid)" />
 
-            {/* Architectural Door Swing Arc (Bottom Wall Entrance) */}
-            <g opacity="0.4" transform={`translate(${unitSize * 2}, ${roomPixelH - 8})`}>
+            {/* Architectural Entrance Door Swing Arc (under walls) */}
+            {doorGeo && (
               <path
-                d={`M 0 0 A ${unitSize * 2} ${unitSize * 2} 0 0 0 ${unitSize * 2} ${-unitSize * 2}`}
+                d={doorGeo.arcD}
                 fill="none"
                 stroke="#64748b"
                 strokeWidth="1.5"
                 strokeDasharray="3 3"
+                opacity="0.85"
               />
-              <line x1="0" y1="0" x2="0" y2={-unitSize * 2} stroke="#334155" strokeWidth="2.5" />
-            </g>
+            )}
 
             {/* Architectural Exterior Wall Boundary */}
             {polygonStr ? (
@@ -677,7 +761,110 @@ export const FloorCanvas: React.FC = () => {
                 strokeWidth="1.5"
               />
             )}
+
+            {/* Architectural Door Opening Cutout, Leaf, & Jambs (on top of walls) */}
+            {doorGeo && (
+              <g className="room-door-assembly">
+                {/* Wall Opening Cutout: clear the dark wall stroke */}
+                <line
+                  x1={doorGeo.thresholdLine.x1}
+                  y1={doorGeo.thresholdLine.y1}
+                  x2={doorGeo.thresholdLine.x2}
+                  y2={doorGeo.thresholdLine.y2}
+                  stroke="#fbf8f3"
+                  strokeWidth="14"
+                  strokeLinecap="square"
+                />
+                {/* Subtle threshold line */}
+                <line
+                  x1={doorGeo.thresholdLine.x1}
+                  y1={doorGeo.thresholdLine.y1}
+                  x2={doorGeo.thresholdLine.x2}
+                  y2={doorGeo.thresholdLine.y2}
+                  stroke="#94a3b8"
+                  strokeWidth="1.5"
+                  strokeDasharray="3 3"
+                />
+                {/* Door Leaf (the solid swinging door panel) */}
+                <line
+                  x1={doorGeo.leafLine.x1}
+                  y1={doorGeo.leafLine.y1}
+                  x2={doorGeo.leafLine.x2}
+                  y2={doorGeo.leafLine.y2}
+                  stroke="#0f172a"
+                  strokeWidth="3.5"
+                  strokeLinecap="round"
+                />
+                {/* Architectural Jamb Blocks */}
+                {doorGeo.jambs.map((jamb, idx) => (
+                  <rect
+                    key={idx}
+                    x={jamb.x}
+                    y={jamb.y}
+                    width={jamb.w}
+                    height={jamb.h}
+                    fill="#1e293b"
+                    rx="1"
+                  />
+                ))}
+              </g>
+            )}
           </svg>
+
+          {/* Interactive Door Drag & Quick Edit Badge (Edit Mode) */}
+          {doorGeo && activeDoor && (
+            <div
+              style={{
+                left: `${doorGeo.badgePos.x}px`,
+                top: `${doorGeo.badgePos.y}px`,
+                transform: 'translate(-50%, -50%)',
+              }}
+              className={`absolute z-35 flex items-center select-none ${
+                appMode === 'edit' ? 'pointer-events-auto opacity-100 scale-100' : 'pointer-events-none opacity-0 scale-90'
+              } transition-all duration-150`}
+            >
+              <div className="flex items-center gap-1 bg-slate-900/90 text-white backdrop-blur-md px-2 py-1 rounded-full shadow-2xl border border-white/20 text-xs font-bold ring-2 ring-amber-400/40">
+                {/* Nudge backward along wall */}
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (room) await nudgeDoor(room.id, -1);
+                  }}
+                  className="w-5 h-5 rounded-full hover:bg-white/20 flex items-center justify-center transition-colors cursor-pointer text-slate-300 hover:text-white"
+                  title="Nudge door backward along wall"
+                >
+                  ‹
+                </button>
+
+                {/* Door Drag Handle / Open Modal Tab */}
+                <div
+                  onMouseDown={handleDoorDragStart}
+                  onTouchStart={handleDoorDragStart}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setRoomShapeModalOpen(true, 'door');
+                  }}
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-white/20 cursor-grab active:cursor-grabbing transition-colors"
+                  title="Drag along wall, or click to configure Door"
+                >
+                  <DoorOpen className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="text-[11px] whitespace-nowrap">Door ({activeDoor.offset}m)</span>
+                </div>
+
+                {/* Nudge forward along wall */}
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (room) await nudgeDoor(room.id, 1);
+                  }}
+                  className="w-5 h-5 rounded-full hover:bg-white/20 flex items-center justify-center transition-colors cursor-pointer text-slate-300 hover:text-white"
+                  title="Nudge door forward along wall"
+                >
+                  ›
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Furniture Elements */}
           {furnitureList.map((furn) => {

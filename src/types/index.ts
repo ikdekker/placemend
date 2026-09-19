@@ -10,7 +10,24 @@ export type Position = {
   rotation: number; // 0, 90, 180, 270 degrees
 };
 
-export type RoomShapeType = 'rectangle' | 'l_shaped' | 't_shaped' | 'custom_polygon';
+export type WallSide = 'top' | 'bottom' | 'left' | 'right';
+export type DoorSwing = 'inward_left' | 'inward_right' | 'outward_left' | 'outward_right';
+
+export type RoomDoor = {
+  wall: WallSide;
+  offset: number; // grid units from start of wall
+  swing?: DoorSwing;
+  width?: number; // default: 2 grid units
+};
+
+export type RoomShapeType = 
+  | 'rectangle' 
+  | 'l_shaped' 
+  | 't_shaped' 
+  | 'u_shaped' 
+  | 'alcove' 
+  | 'chamfered' 
+  | 'custom_polygon';
 
 export type Point2D = {
   x: number;
@@ -33,8 +50,9 @@ export type Room = {
   gridWidth: number;
   gridHeight: number;
   unitSize: number; // pixels per grid cell
-  shapeType?: RoomShapeType; // 'rectangle' | 'l_shaped' | 't_shaped' | 'custom_polygon'
+  shapeType?: RoomShapeType;
   polygonPoints?: Point2D[]; // Explicit corner points in grid units for non-rectangular rooms
+  door?: RoomDoor;
   createdAt: number;
   updatedAt: number;
 };

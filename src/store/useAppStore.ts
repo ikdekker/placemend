@@ -22,6 +22,7 @@ export interface AppState {
   gridSnap: boolean;
   showLabels: boolean;
   isRoomShapeModalOpen: boolean;
+  roomShapeModalTab: 'presets' | 'custom' | 'door';
 
   // Modals & Panels
   isSearchOpen: boolean;
@@ -50,7 +51,8 @@ export interface AppState {
   setSearchOpen: (open: boolean) => void;
   setItemModalOpen: (open: boolean, itemId?: string | null) => void;
   setRoomManagerOpen: (open: boolean) => void;
-  setRoomShapeModalOpen: (open: boolean) => void;
+  setRoomShapeModalOpen: (open: boolean, tab?: 'presets' | 'custom' | 'door') => void;
+  setRoomShapeModalTab: (tab: 'presets' | 'custom' | 'door') => void;
   setFurnitureLibraryOpen: (open: boolean) => void;
   setBackupModalOpen: (open: boolean) => void;
   setSearchQuery: (query: string) => void;
@@ -77,6 +79,7 @@ export const useAppStore = create<AppState>((set) => ({
   gridSnap: true,
   showLabels: true,
   isRoomShapeModalOpen: false,
+  roomShapeModalTab: 'presets',
 
   isSearchOpen: false,
   isItemModalOpen: false,
@@ -116,7 +119,12 @@ export const useAppStore = create<AppState>((set) => ({
   setSearchOpen: (open) => set({ isSearchOpen: open }),
   setItemModalOpen: (open, itemId = null) => set({ isItemModalOpen: open, editingItemId: itemId }),
   setRoomManagerOpen: (open) => set({ isRoomManagerOpen: open }),
-  setRoomShapeModalOpen: (open) => set({ isRoomShapeModalOpen: open }),
+  setRoomShapeModalOpen: (open, tab) =>
+    set((s) => ({
+      isRoomShapeModalOpen: open,
+      roomShapeModalTab: tab !== undefined ? tab : s.roomShapeModalTab,
+    })),
+  setRoomShapeModalTab: (tab) => set({ roomShapeModalTab: tab }),
   setFurnitureLibraryOpen: (open) => set({ isFurnitureLibraryOpen: open }),
   setBackupModalOpen: (open) => set({ isBackupModalOpen: open }),
   setSearchQuery: (query) => set({ searchQuery: query }),
