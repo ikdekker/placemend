@@ -43,7 +43,7 @@ export const SEED_FURNITURE: Furniture[] = [
     type: 'cabinet',
     position: { x: 3, y: 2, rotation: 0 },
     dimension: { width: 7, length: 2, height: 60 },
-    color: '#0284c7',
+    color: '#0f766e', // Deep Teal Cabinet
     icon: 'Tv',
     notes: 'Under the TV with 3 slide-out storage drawers',
     createdAt: Date.now(),
@@ -56,7 +56,7 @@ export const SEED_FURNITURE: Furniture[] = [
     type: 'bookshelf',
     position: { x: 19, y: 2, rotation: 0 },
     dimension: { width: 5, length: 2, height: 180 },
-    color: '#6366f1',
+    color: '#475569', // Slate Charcoal
     icon: 'Library',
     notes: 'Grid shelf with storage inserts and display items',
     createdAt: Date.now(),
@@ -69,7 +69,7 @@ export const SEED_FURNITURE: Furniture[] = [
     type: 'desk',
     position: { x: 3, y: 11, rotation: 0 },
     dimension: { width: 6, length: 3, height: 75 },
-    color: '#10b981',
+    color: '#c29b78', // Warm Natural Oak
     icon: 'Monitor',
     notes: 'Dual monitor desk with cable organizer tray',
     createdAt: Date.now(),
@@ -83,7 +83,7 @@ export const SEED_FURNITURE: Furniture[] = [
     type: 'storage_rack',
     position: { x: 2, y: 2, rotation: 0 },
     dimension: { width: 6, length: 2, height: 200 },
-    color: '#d97706',
+    color: '#475569', // Industrial Steel
     icon: 'Boxes',
     notes: '5 tiered industrial shelving for bins and hardware',
     createdAt: Date.now(),
@@ -96,7 +96,7 @@ export const SEED_FURNITURE: Furniture[] = [
     type: 'workbench',
     position: { x: 11, y: 2, rotation: 0 },
     dimension: { width: 8, length: 3, height: 90 },
-    color: '#ef4444',
+    color: '#9a3412', // Sturdy Maple Butcherblock
     icon: 'Wrench',
     notes: 'Heavy wooden top with tool drawers underneath',
     createdAt: Date.now(),
@@ -401,6 +401,13 @@ export async function seedDemoDataIfEmpty() {
     if (!hasSubCompartment) {
       await db.containers.bulkPut(SEED_CONTAINERS);
       await db.items.bulkPut(SEED_ITEMS);
+    }
+    // Update seed furniture colors to architectural tones if using default colors
+    for (const f of SEED_FURNITURE) {
+      const existing = await db.furniture.get(f.id);
+      if (existing && existing.color !== f.color) {
+        await db.furniture.update(f.id, { color: f.color });
+      }
     }
   }
 }

@@ -3,17 +3,15 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
 import { Point2D } from '../types';
+import { FurnitureGraphic } from './FurnitureGraphic';
 import { 
-  ZoomIn, 
-  ZoomOut, 
   RotateCw, 
   Trash2, 
   Grid, 
   Eye, 
-  Edit3, 
-  Scaling, 
   Pentagon,
-  Maximize2
+  Maximize2,
+  Sliders
 } from 'lucide-react';
 
 export const FloorCanvas: React.FC = () => {
@@ -93,7 +91,7 @@ export const FloorCanvas: React.FC = () => {
   const gridW = room?.gridWidth || 26;
   const gridH = room?.gridHeight || 18;
 
-  // Auto-fit room to viewport (mobile-first calculation)
+  // Auto-fit room to viewport (statically locks and centers the room)
   const fitRoomToViewport = useCallback(() => {
     const containerW = containerRef.current?.clientWidth || (typeof window !== 'undefined' ? window.innerWidth : 412);
     const containerH = containerRef.current?.clientHeight || (typeof window !== 'undefined' ? window.innerHeight - 120 : 700);
@@ -125,7 +123,7 @@ export const FloorCanvas: React.FC = () => {
     });
   }, [room, setZoom, setPanOffset]);
 
-  // Auto-fit immediately on mount, on room change, or fitViewTrigger
+  // Auto-fit on room change or fitViewTrigger
   useEffect(() => {
     fitRoomToViewport();
     const timer = setTimeout(() => {
@@ -143,15 +141,15 @@ export const FloorCanvas: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, [fitRoomToViewport]);
 
-  // Zoom on wheel
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    setZoom((prev) => prev * delta);
-  };
-
-  // Pointer / Touch handlers
+  // In View Mode: Canvas is static. Only in Edit Mode or when explicitly dragging can pan happen.
   const handlePointerDown = (clientX: number, clientY: number, target: EventTarget) => {
+    // If clicking background in view mode, simply deselect furniture without panning
+    if (appMode === 'view') {
+      setSelectedFurnitureId(null);
+      return;
+    }
+
+    // In Edit Mode: allow canvas panning when clicking blank canvas
     if (
       target === containerRef.current || 
       (target as HTMLElement).classList.contains('canvas-bg') ||
@@ -165,7 +163,7 @@ export const FloorCanvas: React.FC = () => {
   };
 
   const handlePointerMove = (clientX: number, clientY: number) => {
-    if (isPanning) {
+    if (isPanning && appMode === 'edit') {
       setPanOffset({
         x: clientX - panStart.x,
         y: clientY - panStart.y,
@@ -238,7 +236,7 @@ export const FloorCanvas: React.FC = () => {
   const handleMouseMove = (e: React.MouseEvent) => handlePointerMove(e.clientX, e.clientY);
   const handleMouseUp = () => handlePointerUp();
 
-  // Multi-touch gestures: Pinch-to-zoom & pan
+  // Multi-touch gestures (two-finger pinch to zoom if desired)
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2 && e.touches[0] && e.touches[1]) {
       setIsPanning(false);
@@ -344,9 +342,11 @@ export const FloorCanvas: React.FC = () => {
   };
 
   const polygonStr = getPolygonPointsString(room?.polygonPoints);
+  const roomPixelW = gridW * unitSize;
+  const roomPixelH = gridH * unitSize;
 
   return (
-    <div 
+    <div
       ref={containerRef}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
@@ -354,81 +354,54 @@ export const FloorCanvas: React.FC = () => {
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
-      onWheel={handleWheel}
-      className="relative flex-1 w-full h-full bg-slate-100 overflow-hidden select-none cursor-grab active:cursor-grabbing canvas-bg touch-none"
+      className={`relative flex-1 w-full h-full bg-slate-200/80 overflow-hidden select-none touch-none ${
+        appMode === 'edit' ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'
+      }`}
     >
-      {/* Floating Canvas Quick Controls (Top Left) */}
-      <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-10 flex items-center gap-1 bg-white/95 backdrop-blur-md p-1 sm:p-1.5 rounded-2xl border border-slate-200 shadow-md text-slate-700">
-        <button
-          onClick={() => setZoom((z) => z * 1.2)}
-          className="p-1.5 hover:text-slate-950 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
-          title="Zoom In"
-        >
-          <ZoomIn className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => setZoom((z) => z * 0.8)}
-          className="p-1.5 hover:text-slate-950 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
-          title="Zoom Out"
-        >
-          <ZoomOut className="w-4 h-4" />
-        </button>
-        <button
-          onClick={fitRoomToViewport}
-          className="p-1.5 hover:text-blue-600 hover:bg-blue-50 text-blue-600 rounded-xl transition-colors cursor-pointer"
-          title="Fit to Screen"
-        >
-          <Maximize2 className="w-4 h-4" />
-        </button>
-        <div className="hidden sm:block w-px h-4 bg-slate-200 mx-0.5" />
-        <button
-          onClick={toggleGridSnap}
-          className={`hidden sm:flex p-1.5 rounded-xl transition-colors cursor-pointer ${
-            gridSnap ? 'bg-blue-50 text-blue-600 border border-blue-200' : 'hover:bg-slate-100 text-slate-400'
-          }`}
-          title={gridSnap ? 'Grid Snap: ON' : 'Grid Snap: OFF'}
-        >
-          <Grid className="w-4 h-4" />
-        </button>
-        <button
-          onClick={toggleShowLabels}
-          className={`hidden sm:flex p-1.5 rounded-xl transition-colors cursor-pointer ${
-            showLabels ? 'bg-blue-50 text-blue-600 border border-blue-200' : 'hover:bg-slate-100 text-slate-400'
-          }`}
-          title={showLabels ? 'Labels: ON' : 'Labels: OFF'}
-        >
-          <Eye className="w-4 h-4" />
-        </button>
-        {appMode === 'edit' && (
+      {/* Clean Edit Toolbar (Only visible when user actively enters Edit Mode) */}
+      {appMode === 'edit' && (
+        <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20 flex items-center gap-1.5 bg-white/95 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-slate-200 shadow-md text-slate-700">
           <button
             onClick={() => setRoomShapeModalOpen(true)}
-            className="p-1.5 rounded-xl text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer"
+            className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer"
             title="Configure Room Walls & Shape"
           >
-            <Pentagon className="w-4 h-4" />
+            <Pentagon className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Room Shape</span>
           </button>
-        )}
-      </div>
+          <div className="w-px h-4 bg-slate-200" />
+          <button
+            onClick={toggleGridSnap}
+            className={`p-1.5 rounded-xl transition-colors cursor-pointer ${
+              gridSnap ? 'bg-blue-50 text-blue-600 border border-blue-200' : 'hover:bg-slate-100 text-slate-400'
+            }`}
+            title={gridSnap ? 'Snap to Grid: ON' : 'Snap to Grid: OFF'}
+          >
+            <Grid className="w-4 h-4" />
+          </button>
+          <button
+            onClick={toggleShowLabels}
+            className={`p-1.5 rounded-xl transition-colors cursor-pointer ${
+              showLabels ? 'bg-blue-50 text-blue-600 border border-blue-200' : 'hover:bg-slate-100 text-slate-400'
+            }`}
+            title={showLabels ? 'Labels: ON' : 'Labels: OFF'}
+          >
+            <Eye className="w-4 h-4" />
+          </button>
+          <button
+            onClick={fitRoomToViewport}
+            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer"
+            title="Reset Room Framing"
+          >
+            <Maximize2 className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
-      {/* Mode Indicator Banner (Top Right, desktop only to keep mobile clean) */}
-      <div className="hidden md:flex absolute top-4 right-4 z-10 items-center gap-2 bg-white/95 backdrop-blur-md px-3 py-1.5 rounded-2xl border border-slate-200 shadow-sm text-xs font-semibold text-slate-600">
-        {appMode === 'edit' ? (
-          <div className="flex items-center gap-1.5 text-blue-600">
-            <Edit3 className="w-3.5 h-3.5 animate-pulse" />
-            <span>Edit Mode: Drag to move • Bottom-right handle to resize</span>
-          </div>
-        ) : (
-          <div className="flex items-center gap-1.5 text-slate-600">
-            <Eye className="w-3.5 h-3.5 text-blue-600" />
-            <span>View Mode: Click furniture to inspect contents</span>
-          </div>
-        )}
-      </div>
-
-      {/* Selected Furniture Controls Toolbar (Only in Edit Mode, placed safely above mobile dock) */}
+      {/* Selected Furniture Controls Toolbar (Only in Edit Mode) */}
       {selectedFurnitureId && appMode === 'edit' && (
-        <div className="absolute bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-white/95 backdrop-blur-md px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-2xl border border-slate-200 shadow-xl text-slate-800">
-          <span className="text-xs font-bold font-mono text-blue-600 truncate max-w-[100px] sm:max-w-[140px]">
+        <div className="absolute bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-white/95 backdrop-blur-md px-3.5 py-1.5 rounded-2xl border border-slate-200 shadow-xl text-slate-800">
+          <span className="text-xs font-bold text-slate-800 truncate max-w-[120px]">
             {furnitureList.find((f) => f.id === selectedFurnitureId)?.name || 'Selected'}
           </span>
           <div className="w-px h-4 bg-slate-200" />
@@ -438,7 +411,7 @@ export const FloorCanvas: React.FC = () => {
             title="Rotate 90°"
           >
             <RotateCw className="w-3.5 h-3.5 text-blue-600" />
-            <span className="hidden sm:inline">Rotate</span>
+            <span>Rotate</span>
           </button>
           <button
             onClick={deleteSelectedFurniture}
@@ -446,12 +419,12 @@ export const FloorCanvas: React.FC = () => {
             title="Delete Furniture"
           >
             <Trash2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Delete</span>
+            <span>Delete</span>
           </button>
         </div>
       )}
 
-      {/* Transform Container (Pan & Zoom) */}
+      {/* Transform Container (Positioned and scaled to frame the room) */}
       <div
         style={{
           transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
@@ -459,51 +432,125 @@ export const FloorCanvas: React.FC = () => {
         }}
         className="absolute transition-transform duration-75 ease-out"
       >
-        {/* Floor Perimeter Wall Container (has canvas-bg for tap-to-deselect) */}
+        {/* Architectural Room Floor & Walls */}
         <div
           style={{
-            width: gridW * unitSize,
-            height: gridH * unitSize,
+            width: roomPixelW,
+            height: roomPixelH,
           }}
-          className="relative rounded-2xl overflow-hidden shadow-2xl bg-white border-2 border-slate-300 canvas-bg"
+          className="relative rounded-2xl shadow-2xl canvas-bg"
         >
-          {/* SVG Shape / Walls */}
-          {polygonStr ? (
-            <svg className="absolute inset-0 w-full h-full pointer-events-none">
-              <polygon
-                points={polygonStr}
-                fill="#f8fafc"
-                stroke="#475569"
-                strokeWidth="6"
-                strokeLinejoin="round"
-              />
-            </svg>
-          ) : null}
-
-          {/* Clean architectural grid lines */}
-          <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-40">
+          {/* SVG Floor Material & Architectural Walls */}
+          <svg className="absolute inset-0 w-full h-full pointer-events-none rounded-2xl overflow-hidden">
             <defs>
+              {/* Scandinavian Light Oak Parquet Pattern */}
               <pattern
-                id="arch-grid"
-                width={unitSize}
-                height={unitSize}
+                id="wood-parquet"
+                width={unitSize * 2}
+                height={unitSize * 2}
                 patternUnits="userSpaceOnUse"
               >
-                <path
-                  d={`M ${unitSize} 0 L 0 0 0 ${unitSize}`}
-                  fill="none"
-                  stroke="#cbd5e1"
-                  strokeWidth="1"
-                />
+                {/* Subtle base wood tone */}
+                <rect width={unitSize * 2} height={unitSize * 2} fill="#fbf8f3" />
+                {/* Horizontal planks */}
+                <rect x="0" y="0" width={unitSize * 2} height={unitSize} fill="#f7f3eb" />
+                <line x1="0" y1={unitSize} x2={unitSize * 2} y2={unitSize} stroke="#ece4d8" strokeWidth="1" />
+                <line x1={unitSize} y1="0" x2={unitSize} y2={unitSize} stroke="#ece4d8" strokeWidth="1" />
+                {/* Vertical alternate planks */}
+                <line x1="0" y1={unitSize * 2} x2={unitSize * 2} y2={unitSize * 2} stroke="#ece4d8" strokeWidth="1" />
+                <line x1={unitSize * 0.5} y1={unitSize} x2={unitSize * 0.5} y2={unitSize * 2} stroke="#ece4d8" strokeWidth="1" />
+                <line x1={unitSize * 1.5} y1={unitSize} x2={unitSize * 1.5} y2={unitSize * 2} stroke="#ece4d8" strokeWidth="1" />
               </pattern>
-            </defs>
-            <rect width="100%" height="100%" fill="url(#arch-grid)" />
-          </svg>
 
-          {/* Room Name Tag */}
-          <div className="absolute bottom-3 right-4 font-mono font-black text-xl text-slate-300 select-none uppercase tracking-widest pointer-events-none">
-            {room?.name || 'Floor Plan'}
-          </div>
+              {/* Floor ambient occlusion edge shadow */}
+              <filter id="wall-shadow" x="-5%" y="-5%" width="110%" height="110%">
+                <feDropShadow dx="0" dy="4" stdDeviation="6" floodOpacity="0.25" />
+              </filter>
+            </defs>
+
+            {/* Main Floor Surface with Warm Parquet */}
+            {polygonStr ? (
+              <polygon
+                points={polygonStr}
+                fill="url(#wood-parquet)"
+              />
+            ) : (
+              <rect width="100%" height="100%" fill="url(#wood-parquet)" />
+            )}
+
+            {/* Architectural Grid (Subtle Guide) */}
+            <pattern
+              id="subtle-grid"
+              width={unitSize}
+              height={unitSize}
+              patternUnits="userSpaceOnUse"
+            >
+              <path
+                d={`M ${unitSize} 0 L 0 0 0 ${unitSize}`}
+                fill="none"
+                stroke="#e2d8c9"
+                strokeWidth="0.5"
+                opacity="0.4"
+              />
+            </pattern>
+            <rect width="100%" height="100%" fill="url(#subtle-grid)" />
+
+            {/* Architectural Door Swing Arc (Bottom Wall Entrance) */}
+            <g opacity="0.4" transform={`translate(${unitSize * 2}, ${roomPixelH - 8})`}>
+              <path
+                d={`M 0 0 A ${unitSize * 2} ${unitSize * 2} 0 0 0 ${unitSize * 2} ${-unitSize * 2}`}
+                fill="none"
+                stroke="#64748b"
+                strokeWidth="1.5"
+                strokeDasharray="3 3"
+              />
+              <line x1="0" y1="0" x2="0" y2={-unitSize * 2} stroke="#334155" strokeWidth="2.5" />
+            </g>
+
+            {/* Architectural Exterior Wall Boundary */}
+            {polygonStr ? (
+              <polygon
+                points={polygonStr}
+                fill="none"
+                stroke="#1e293b"
+                strokeWidth="12"
+                strokeLinejoin="round"
+              />
+            ) : (
+              <rect
+                x="6"
+                y="6"
+                width={roomPixelW - 12}
+                height={roomPixelH - 12}
+                rx="14"
+                fill="none"
+                stroke="#1e293b"
+                strokeWidth="12"
+              />
+            )}
+
+            {/* Inner Plaster Bevel Stroke */}
+            {polygonStr ? (
+              <polygon
+                points={polygonStr}
+                fill="none"
+                stroke="#475569"
+                strokeWidth="2"
+                strokeLinejoin="round"
+              />
+            ) : (
+              <rect
+                x="12"
+                y="12"
+                width={roomPixelW - 24}
+                height={roomPixelH - 24}
+                rx="8"
+                fill="none"
+                stroke="#cbd5e1"
+                strokeWidth="1.5"
+              />
+            )}
+          </svg>
 
           {/* Furniture Elements */}
           {furnitureList.map((furn) => {
@@ -557,45 +604,31 @@ export const FloorCanvas: React.FC = () => {
                   top: `${top}px`,
                   width: `${w}px`,
                   height: `${l}px`,
-                  backgroundColor: furn.color || '#3b82f6',
                 }}
-                className={`absolute rounded-xl shadow-md transition-shadow flex flex-col items-center justify-center p-1.5 border-2 select-none group ${
-                  appMode === 'edit' ? 'cursor-move' : 'cursor-pointer hover:shadow-lg'
-                } ${
-                  isSelected
-                    ? 'ring-4 ring-blue-500 border-white z-20 shadow-blue-500/30 shadow-2xl'
-                    : 'border-slate-800/40 hover:border-slate-800/80 z-10'
-                } ${
-                  isHighlighted ? 'animate-bounce ring-4 ring-amber-500 border-white z-30' : ''
-                }`}
+                className={`absolute select-none transition-transform duration-100 ${
+                  appMode === 'edit' ? 'cursor-move' : 'cursor-pointer hover:scale-[1.015] active:scale-[0.98]'
+                } ${isSelected ? 'z-20' : 'z-10'}`}
               >
-                {/* Visual Locator Pulse Beacon */}
+                {/* Rich Top-Down Architectural Furniture Graphic */}
+                <FurnitureGraphic
+                  type={furn.type}
+                  name={furn.name}
+                  color={furn.color}
+                  width={w}
+                  height={l}
+                  rotation={furn.position.rotation}
+                  itemCount={itemCount}
+                  isSelected={isSelected}
+                  isHighlighted={isHighlighted}
+                  showLabels={showLabels}
+                />
+
+                {/* Visual Locator Pulse Beacon for Search Match */}
                 {isHighlighted && (
-                  <span className="absolute -inset-3 rounded-2xl bg-amber-400/50 animate-ping pointer-events-none" />
+                  <span className="absolute -inset-2.5 rounded-xl bg-amber-400/60 animate-ping pointer-events-none" />
                 )}
 
-                {/* Wood / Shelving Texture Lines */}
-                <div className="absolute inset-1 rounded-lg border border-white/30 pointer-events-none flex flex-col justify-around py-0.5 opacity-70">
-                  <div className="w-full h-px bg-white/30" />
-                  <div className="w-full h-px bg-white/30" />
-                </div>
-
-                {/* Label & Item Count Badge */}
-                {showLabels && (
-                  <div className="relative z-10 flex flex-col items-center text-center max-w-full px-1">
-                    <span className="text-xs font-bold text-white drop-shadow-sm leading-tight line-clamp-2">
-                      {furn.name}
-                    </span>
-                    {itemCount > 0 && (
-                      <span className="mt-0.5 px-2 py-0.2 rounded-full bg-slate-900/80 text-white font-mono text-[10px] font-black border border-white/30 shadow-sm flex items-center gap-1">
-                        <span>📦</span>
-                        <span>{itemCount}</span>
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {/* Bottom-Right Resize Handle (Visible in Edit Mode, sized for mobile touch) */}
+                {/* Bottom-Right Resize Handle (Visible ONLY in Edit Mode) */}
                 {appMode === 'edit' && (
                   <div
                     onMouseDown={(e) => {
@@ -622,10 +655,10 @@ export const FloorCanvas: React.FC = () => {
                         });
                       }
                     }}
-                    className="absolute bottom-0.5 right-0.5 w-6 h-6 sm:w-4 sm:h-4 rounded-br-lg bg-white/95 text-slate-800 shadow-md flex items-center justify-center cursor-se-resize z-30 transition-transform active:scale-125 border border-slate-300"
+                    className="absolute bottom-1 right-1 w-5 h-5 rounded-md bg-white text-slate-800 shadow-md flex items-center justify-center cursor-se-resize z-30 transition-transform active:scale-125 border border-slate-300"
                     title="Drag to resize dimensions"
                   >
-                    <Scaling className="w-3.5 h-3.5 sm:w-2.5 sm:h-2.5 text-blue-600" />
+                    <Sliders className="w-3 h-3 text-blue-600" />
                   </div>
                 )}
               </div>
