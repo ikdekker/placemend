@@ -67,10 +67,12 @@ export const FloorCanvas: React.FC = () => {
   // Dragging / Moving Furniture (Only enabled in Edit Mode)
   const [draggingFurnitureId, setDraggingFurnitureId] = useState<string | null>(null);
   const [dragStartPos, setDragStartPos] = useState({ mouseX: 0, mouseY: 0, origX: 0, origY: 0 });
+  const [dragLivePos, setDragLivePos] = useState<{ id: string; x: number; y: number } | null>(null);
 
   // Resizing Furniture from bottom-right handle (Only enabled in Edit Mode)
   const [resizingFurnitureId, setResizingFurnitureId] = useState<string | null>(null);
   const [resizeStart, setResizeStart] = useState({ mouseX: 0, mouseY: 0, origW: 0, origL: 0 });
+  const [resizeLiveDim, setResizeLiveDim] = useState<{ id: string; w: number; l: number } | null>(null);
 
   const room = useLiveQuery(async () => {
     if (!selectedRoomId) return undefined;
@@ -189,6 +191,11 @@ export const FloorCanvas: React.FC = () => {
             origX: furn.position.x,
             origY: furn.position.y,
           });
+          setDragLivePos({
+            id: furnId,
+            x: furn.position.x,
+            y: furn.position.y,
+          });
         }
         return;
       }
@@ -240,10 +247,10 @@ export const FloorCanvas: React.FC = () => {
         newX = Math.max(0, Math.min(gridW - w, newX));
         newY = Math.max(0, Math.min(gridH - l, newY));
 
-        db.furniture.update(draggingFurnitureId, {
-          'position.x': newX,
-          'position.y': newY,
-          updatedAt: Date.now(),
+        setDragLivePos({
+          id: draggingFurnitureId,
+          x: newX,
+          y: newY,
         });
       }
       return;
@@ -265,22 +272,42 @@ export const FloorCanvas: React.FC = () => {
       newW = Math.max(1, Math.min(18, newW));
       newL = Math.max(1, Math.min(18, newL));
 
-      db.furniture.update(resizingFurnitureId, {
-        'dimension.width': newW,
-        'dimension.length': newL,
-        updatedAt: Date.now(),
+      setResizeLiveDim({
+        id: resizingFurnitureId,
+        w: newW,
+        l: newL,
       });
     }
   };
 
   const handlePointerUp = () => {
-    // If the finger was stationary (< 5px movement), it's a clean TAP:
+    // If dragging furniture, commit the new position to DB
+    if (draggingFurnitureId && dragLivePos && dragLivePos.id === draggingFurnitureId) {
+      db.furniture.update(draggingFurnitureId, {
+        'position.x': dragLivePos.x,
+        'position.y': dragLivePos.y,
+        updatedAt: Date.now(),
+      });
+      setDragLivePos(null);
+    }
+
+    // If resizing furniture, commit new dimensions to DB
+    if (resizingFurnitureId && resizeLiveDim && resizeLiveDim.id === resizingFurnitureId) {
+      db.furniture.update(resizingFurnitureId, {
+        'dimension.width': resizeLiveDim.w,
+        'dimension.length': resizeLiveDim.l,
+        updatedAt: Date.now(),
+      });
+      setResizeLiveDim(null);
+    }
+
+    // If the finger/mouse was stationary (< 5px movement), it's a clean TAP:
     if (!hasDragged.current) {
       if (pointerDownPos.current.targetFurnitureId) {
-        // Tapped a furniture piece -> Open that furniture
+        // Tapped a furniture piece
         setSelectedFurnitureId(pointerDownPos.current.targetFurnitureId);
-      } else if (appMode === 'view') {
-        // Tapped empty room floor in View Mode -> Deselect
+      } else {
+        // Tapped empty room floor -> Deselect
         setSelectedFurnitureId(null);
       }
     }
@@ -294,6 +321,26 @@ export const FloorCanvas: React.FC = () => {
     setDraggingFurnitureId(null);
     setResizingFurnitureId(null);
   };
+
+  // Global listeners to prevent drag loss if cursor moves fast outside canvas
+  useEffect(() => {
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      if (draggingFurnitureId || resizingFurnitureId || isPanning) {
+        handlePointerMove(e.clientX, e.clientY);
+      }
+    };
+    const handleGlobalMouseUp = () => {
+      if (draggingFurnitureId || resizingFurnitureId || isPanning) {
+        handlePointerUp();
+      }
+    };
+    window.addEventListener('mousemove', handleGlobalMouseMove);
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleGlobalMouseMove);
+      window.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
+  });
 
   // Mouse wrapper events
   const handleMouseDown = (e: React.MouseEvent) => handlePointerDown(e.clientX, e.clientY, e.target);
@@ -641,58 +688,34 @@ export const FloorCanvas: React.FC = () => {
             const searchCount = matchCountsByFurniture.get(furn.id) || 0;
             const itemCount = itemCountsByFurniture[furn.id] || 0;
 
+            const posX = (dragLivePos && dragLivePos.id === furn.id) ? dragLivePos.x : furn.position.x;
+            const posY = (dragLivePos && dragLivePos.id === furn.id) ? dragLivePos.y : furn.position.y;
+            const dimW = (resizeLiveDim && resizeLiveDim.id === furn.id) ? resizeLiveDim.w : furn.dimension.width;
+            const dimL = (resizeLiveDim && resizeLiveDim.id === furn.id) ? resizeLiveDim.l : furn.dimension.length;
+
             const isRotated = furn.position.rotation % 180 !== 0;
-            const w = (isRotated ? furn.dimension.length : furn.dimension.width) * unitSize;
-            const l = (isRotated ? furn.dimension.width : furn.dimension.length) * unitSize;
-            const left = furn.position.x * unitSize;
-            const top = furn.position.y * unitSize;
+            const w = (isRotated ? dimL : dimW) * unitSize;
+            const l = (isRotated ? dimW : dimL) * unitSize;
+            const left = posX * unitSize;
+            const top = posY * unitSize;
+            const isCurrentlyDragging = draggingFurnitureId === furn.id;
 
             return (
               <div
                 key={furn.id}
                 id={`furniture-${furn.id}`}
                 data-furniture-id={furn.id}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  // If user dragged to pan across the room, do NOT open the furniture!
-                  if (hasDragged.current) return;
-                  setSelectedFurnitureId(furn.id);
-                }}
-                onMouseDown={(e) => {
-                  if (appMode === 'edit') {
-                    e.stopPropagation();
-                    setSelectedFurnitureId(furn.id);
-                    setDraggingFurnitureId(furn.id);
-                    setDragStartPos({
-                      mouseX: e.clientX,
-                      mouseY: e.clientY,
-                      origX: furn.position.x,
-                      origY: furn.position.y,
-                    });
-                  }
-                }}
-                onTouchStart={(e) => {
-                  if (appMode === 'edit' && e.touches[0]) {
-                    e.stopPropagation();
-                    setSelectedFurnitureId(furn.id);
-                    setDraggingFurnitureId(furn.id);
-                    setDragStartPos({
-                      mouseX: e.touches[0].clientX,
-                      mouseY: e.touches[0].clientY,
-                      origX: furn.position.x,
-                      origY: furn.position.y,
-                    });
-                  }
-                }}
                 style={{
                   left: `${left}px`,
                   top: `${top}px`,
                   width: `${w}px`,
                   height: `${l}px`,
                 }}
-                className={`absolute select-none transition-all duration-200 ${
+                className={`absolute select-none ${
+                  isCurrentlyDragging ? 'transition-none z-35 shadow-2xl scale-[1.02] ring-4 ring-blue-500 rounded-2xl' : 'transition-all duration-150'
+                } ${
                   appMode === 'edit' ? 'cursor-move' : 'cursor-pointer hover:scale-[1.02] active:scale-[0.98]'
-                } ${isSelected ? 'z-20' : isSearchMatch ? 'z-25 scale-[1.02]' : 'z-10'} ${
+                } ${isSelected ? 'z-20 ring-2 ring-blue-600 rounded-2xl' : isSearchMatch ? 'z-25 scale-[1.02]' : 'z-10'} ${
                   isSearchDimmed ? 'opacity-30 grayscale-[35%]' : 'opacity-100'
                 }`}
               >

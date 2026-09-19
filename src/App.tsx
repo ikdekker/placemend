@@ -15,7 +15,7 @@ import { seedDemoDataIfEmpty } from './db/sampleData';
 import { useAppStore } from './store/useAppStore';
 
 export function App() {
-  const { selectedFurnitureId, selectedContainerId } = useAppStore();
+  const { appMode, selectedFurnitureId, selectedContainerId } = useAppStore();
 
   useEffect(() => {
     // Seed rich starter apartment & workshop demo data if database is brand new
@@ -32,7 +32,7 @@ export function App() {
         {/* Floating Active Search Pill (when search is illuminating rooms) */}
         <FloatingSearchBanner />
 
-        {selectedFurnitureId === null ? (
+        {appMode === 'edit' || selectedFurnitureId === null ? (
           <FloorCanvas />
         ) : selectedContainerId === null ? (
           <PhysicalFurnitureView />

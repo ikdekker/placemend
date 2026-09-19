@@ -32,6 +32,7 @@ export const Header: React.FC = () => {
     setFurnitureLibraryOpen,
     setBackupModalOpen,
     resetView,
+    setSelectedFurnitureId,
   } = useAppStore();
 
   const { isSearching, totalMatches } = useVisualSearch();
@@ -166,11 +167,14 @@ export const Header: React.FC = () => {
           )}
         </button>
 
-        {/* Desktop View vs Edit Mode */}
-        <div className="hidden md:flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200">
+        {/* View vs Edit Mode Toggle (Responsive) */}
+        <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200">
           <button
-            onClick={() => setAppMode('view')}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            onClick={() => {
+              setAppMode('view');
+              setSelectedFurnitureId(null);
+            }}
+            className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               appMode === 'view'
                 ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
                 : 'text-slate-500 hover:text-slate-800'
@@ -182,8 +186,11 @@ export const Header: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setAppMode('edit')}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            onClick={() => {
+              setAppMode('edit');
+              setSelectedFurnitureId(null);
+            }}
+            className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               appMode === 'edit'
                 ? 'bg-blue-600 text-white shadow-xs'
                 : 'text-slate-500 hover:text-slate-800'
