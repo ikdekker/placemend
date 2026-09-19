@@ -271,6 +271,66 @@ export const SEED_ITEMS: Item[] = [
     updatedAt: Date.now(),
   },
   {
+    id: 'item-gan-charger',
+    containerId: 'cont-console-d1',
+    name: 'Anker 65W GaN Nano II Fast Wall Charger',
+    description: 'Foldable 3-port compact charger',
+    quantity: 1,
+    category: 'Electronics',
+    tags: ['power', 'anker', 'charger'],
+    favorite: true,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+  {
+    id: 'item-audio-dac',
+    containerId: 'cont-console-d1',
+    name: 'USB-C to 3.5mm Hi-Res Audio Headphone DAC',
+    description: 'Braided aluminum adapter',
+    quantity: 2,
+    category: 'Electronics',
+    tags: ['audio', 'adapter', 'headphones'],
+    favorite: false,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+  {
+    id: 'item-ethernet',
+    containerId: 'cont-console-d1',
+    name: 'Cat 6A Shielded Ethernet Cable (5m)',
+    description: 'Snagless RJ45 gigabit network cord',
+    quantity: 1,
+    category: 'Electronics',
+    tags: ['network', 'ethernet', 'cable'],
+    favorite: false,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+  {
+    id: 'item-cable-ties',
+    containerId: 'cont-console-d1',
+    name: 'Reusable Velcro Cable Straps (Pack of 20)',
+    description: 'Black cable management wrap',
+    quantity: 20,
+    category: 'General',
+    tags: ['cables', 'organization', 'velcro'],
+    favorite: false,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+  {
+    id: 'item-sandisk-ssd',
+    containerId: 'cont-console-d1',
+    name: 'SanDisk Extreme 1TB Portable Rugged SSD',
+    description: 'USB 3.2 Gen 2 external drive with rubber bumper',
+    quantity: 1,
+    category: 'Electronics',
+    tags: ['storage', 'backup', 'ssd'],
+    favorite: true,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+  {
     id: 'item-passports',
     containerId: 'cont-console-d3',
     name: 'Dutch Passports & International Driving Permit',
@@ -317,6 +377,42 @@ export const SEED_ITEMS: Item[] = [
     category: 'Games',
     tags: ['boardgame', 'party', 'cards'],
     favorite: false,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+  {
+    id: 'item-uno-flip',
+    containerId: 'cont-kallax-bin1-sub1',
+    name: 'Uno Flip! Double-Sided Card Deck',
+    description: 'Tin travel box',
+    quantity: 1,
+    category: 'Games',
+    tags: ['boardgame', 'cards', 'party'],
+    favorite: true,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+  {
+    id: 'item-codenames',
+    containerId: 'cont-kallax-bin1-sub1',
+    name: 'Codenames: Duet 2-Player Word Game',
+    description: 'Cooperative word deduction',
+    quantity: 1,
+    category: 'Games',
+    tags: ['boardgame', 'words', 'coop'],
+    favorite: false,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+  {
+    id: 'item-metal-dice',
+    containerId: 'cont-kallax-bin1-sub1',
+    name: '7-Piece Antique Bronze Polyhedral RPG Metal Dice Set',
+    description: 'D4, D6, D8, D10, D12, D20 in velvet pouch',
+    quantity: 1,
+    category: 'Games',
+    tags: ['dice', 'dnd', 'rpg'],
+    favorite: true,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   },
@@ -396,12 +492,9 @@ export async function seedDemoDataIfEmpty() {
     });
     console.log('Placemend demo database initialized with sample apartment data!');
   } else {
-    // Ensure nested demo compartments exist for previously initialized databases
-    const hasSubCompartment = await db.containers.get('cont-kallax-bin1-sub1');
-    if (!hasSubCompartment) {
-      await db.containers.bulkPut(SEED_CONTAINERS);
-      await db.items.bulkPut(SEED_ITEMS);
-    }
+    // Ensure nested demo compartments and full item catalog exist
+    await db.containers.bulkPut(SEED_CONTAINERS);
+    await db.items.bulkPut(SEED_ITEMS);
     // Update seed furniture colors to architectural tones if using default colors
     for (const f of SEED_FURNITURE) {
       const existing = await db.furniture.get(f.id);

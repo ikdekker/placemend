@@ -27,7 +27,7 @@ export function App() {
       <Header />
 
       {/* Main Workspace Area: True Visual Zoom Navigation */}
-      <main className="flex-1 flex w-full h-full overflow-hidden relative">
+      <main className="flex-1 min-h-0 w-full relative flex flex-col overflow-hidden">
         {selectedFurnitureId === null ? (
           <FloorCanvas />
         ) : selectedContainerId === null ? (

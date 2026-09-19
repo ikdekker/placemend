@@ -135,9 +135,9 @@ export const DrawerInteriorView: React.FC = () => {
   const backLabel = parentContainer ? parentContainer.name : furniture.name;
 
   return (
-    <div className="flex-1 w-full h-full bg-slate-100 flex flex-col select-none overflow-hidden animate-in fade-in duration-150">
+    <div className="flex-1 min-h-0 w-full bg-slate-100 flex flex-col overflow-hidden animate-in fade-in duration-150">
       {/* Top Header Bar */}
-      <div className="bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between shadow-xs">
+      <div className="bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between shadow-xs flex-shrink-0">
         <div className="flex items-center gap-2.5 min-w-0">
           <button
             data-action="drawer-back"
@@ -168,7 +168,7 @@ export const DrawerInteriorView: React.FC = () => {
       </div>
 
       {/* Main Drawer Interior View */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex flex-col items-center">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y w-full p-4 sm:p-6 pb-36 sm:pb-16 flex flex-col items-center">
         <div className="w-full max-w-2xl flex flex-col gap-4">
           
           {/* Sub-Divided Compartments View (if drawer has divider trays) */}
