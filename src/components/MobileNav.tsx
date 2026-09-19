@@ -5,16 +5,12 @@ import {
   Search, 
   Plus, 
   SlidersHorizontal, 
-  Eye, 
-  Edit3,
   Zap,
   Home
 } from 'lucide-react';
 
 export const MobileNav: React.FC = () => {
   const {
-    appMode,
-    setAppMode,
     isSearchOpen,
     setSearchOpen,
     setFurnitureLibraryOpen,
@@ -52,8 +48,8 @@ export const MobileNav: React.FC = () => {
         </span>
       </button>
 
-      {/* Room (back to floor plan) — only when deep inside furniture/drawer */}
-      {isDeep ? (
+      {/* Room (back to floor plan) — visible when inside furniture/drawer */}
+      {isDeep && (
         <button
           onClick={handleGoHome}
           className="flex-1 min-w-0 flex flex-col items-center justify-center gap-1 text-blue-600 transition-colors cursor-pointer py-1 min-h-[52px]"
@@ -62,19 +58,6 @@ export const MobileNav: React.FC = () => {
             <Home className="w-5 h-5 text-blue-600" />
           </div>
           <span className="text-[11px] font-black truncate">Room</span>
-        </button>
-      ) : (
-        /* View / Edit Mode Toggle — only at room level */
-        <button
-          onClick={() => setAppMode(appMode === 'view' ? 'edit' : 'view')}
-          className={`flex-1 min-w-0 flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer py-1 min-h-[52px] ${
-            appMode === 'edit' ? 'text-blue-600' : 'text-slate-600'
-          }`}
-        >
-          <div className={`p-2 rounded-xl ${appMode === 'edit' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}>
-            {appMode === 'edit' ? <Edit3 className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-          </div>
-          <span className="text-[11px] font-black truncate">{appMode === 'edit' ? 'Edit' : 'View'}</span>
         </button>
       )}
 
