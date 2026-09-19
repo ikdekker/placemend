@@ -7,7 +7,8 @@ import {
   SlidersHorizontal, 
   Eye, 
   Edit3,
-  Zap
+  Zap,
+  Home
 } from 'lucide-react';
 
 export const MobileNav: React.FC = () => {
@@ -18,9 +19,19 @@ export const MobileNav: React.FC = () => {
     setSearchOpen,
     setFurnitureLibraryOpen,
     setRoomManagerOpen,
+    selectedFurnitureId,
+    setSelectedFurnitureId,
+    setSelectedContainerId,
   } = useAppStore();
 
   const { isSearching, totalMatches } = useVisualSearch();
+
+  const isDeep = selectedFurnitureId !== null;
+
+  const handleGoHome = () => {
+    setSelectedContainerId(null);
+    setSelectedFurnitureId(null);
+  };
 
   return (
     <div className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 px-2 py-2 flex items-center justify-between shadow-lg select-none pb-[max(env(safe-area-inset-bottom),8px)]">
@@ -41,18 +52,31 @@ export const MobileNav: React.FC = () => {
         </span>
       </button>
 
-      {/* View / Edit Mode Toggle */}
-      <button
-        onClick={() => setAppMode(appMode === 'view' ? 'edit' : 'view')}
-        className={`flex-1 min-w-0 flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer py-1 min-h-[52px] ${
-          appMode === 'edit' ? 'text-blue-600' : 'text-slate-600'
-        }`}
-      >
-        <div className={`p-2 rounded-xl ${appMode === 'edit' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}>
-          {appMode === 'edit' ? <Edit3 className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-        </div>
-        <span className="text-[11px] font-black truncate">{appMode === 'edit' ? 'Edit' : 'View'}</span>
-      </button>
+      {/* Room (back to floor plan) — only when deep inside furniture/drawer */}
+      {isDeep ? (
+        <button
+          onClick={handleGoHome}
+          className="flex-1 min-w-0 flex flex-col items-center justify-center gap-1 text-blue-600 transition-colors cursor-pointer py-1 min-h-[52px]"
+        >
+          <div className="p-2 rounded-xl bg-blue-100">
+            <Home className="w-5 h-5 text-blue-600" />
+          </div>
+          <span className="text-[11px] font-black truncate">Room</span>
+        </button>
+      ) : (
+        /* View / Edit Mode Toggle — only at room level */
+        <button
+          onClick={() => setAppMode(appMode === 'view' ? 'edit' : 'view')}
+          className={`flex-1 min-w-0 flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer py-1 min-h-[52px] ${
+            appMode === 'edit' ? 'text-blue-600' : 'text-slate-600'
+          }`}
+        >
+          <div className={`p-2 rounded-xl ${appMode === 'edit' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}>
+            {appMode === 'edit' ? <Edit3 className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+          </div>
+          <span className="text-[11px] font-black truncate">{appMode === 'edit' ? 'Edit' : 'View'}</span>
+        </button>
+      )}
 
       {/* Add Furniture (Center Action) */}
       <button
