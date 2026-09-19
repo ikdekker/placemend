@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
 import { RoomShapeType, Point2D, WallSide, DoorSwing, RoomDoor } from '../types';
-import { rotateRoom90Clockwise, mirrorRoom } from '../utils/roomGeometry';
+import { rotateRoom90Clockwise, mirrorRoom, getRoomDoors } from '../utils/roomGeometry';
 import { 
   X, 
   Check, 
@@ -242,15 +242,22 @@ export const RoomShapeModal: React.FC = () => {
   const [customPoints, setCustomPoints] = useState<Point2D[]>([]);
   const [hasInitializedCustom, setHasInitializedCustom] = useState(false);
 
-  // Local state for door editing
-  const [doorWall, setDoorWall] = useState<WallSide>('bottom');
-  const [doorOffset, setDoorOffset] = useState<number>(2);
-  const [doorSwing, setDoorSwing] = useState<DoorSwing>('inward_left');
-  const [doorWidth, setDoorWidth] = useState<number>(2);
+  // Local state for multi-door editing
+  const [doorsList, setDoorsList] = useState<RoomDoor[]>([]);
+  const [activeDoorId, setActiveDoorId] = useState<string>('door-1');
+  const [hasInitializedDoors, setHasInitializedDoors] = useState(false);
+
+  // Reset initialization when modal opens/closes
+  React.useEffect(() => {
+    if (!isRoomShapeModalOpen) {
+      setHasInitializedCustom(false);
+      setHasInitializedDoors(false);
+    }
+  }, [isRoomShapeModalOpen]);
 
   // Synchronize initial values when room loads
   React.useEffect(() => {
-    if (room) {
+    if (room && isRoomShapeModalOpen) {
       if (!hasInitializedCustom) {
         if (room.polygonPoints && room.polygonPoints.length >= 3) {
           setCustomPoints(room.polygonPoints);
@@ -265,14 +272,16 @@ export const RoomShapeModal: React.FC = () => {
         setHasInitializedCustom(true);
       }
 
-      if (room.door) {
-        setDoorWall(room.door.wall);
-        setDoorOffset(room.door.offset);
-        setDoorSwing(room.door.swing || 'inward_left');
-        setDoorWidth(room.door.width || 2);
+      if (!hasInitializedDoors) {
+        const initialDoors = getRoomDoors(room);
+        setDoorsList(initialDoors);
+        if (initialDoors.length > 0) {
+          setActiveDoorId(initialDoors[0].id || 'door-1');
+        }
+        setHasInitializedDoors(true);
       }
     }
-  }, [room, hasInitializedCustom]);
+  }, [room, isRoomShapeModalOpen, hasInitializedCustom, hasInitializedDoors]);
 
   if (!isRoomShapeModalOpen || !room) return null;
 
@@ -348,24 +357,56 @@ export const RoomShapeModal: React.FC = () => {
     setRoomShapeModalOpen(false);
   };
 
+  // Active selected door helper
+  const selectedDoor = doorsList.find((d) => d.id === activeDoorId) || doorsList[0] || null;
+
+  const updateSelectedDoor = (patch: Partial<RoomDoor>) => {
+    if (!selectedDoor) return;
+    setDoorsList((prev) =>
+      prev.map((d) => (d.id === selectedDoor.id ? { ...d, ...patch } : d))
+    );
+  };
+
+  const handleAddDoor = () => {
+    const newId = `door-${Date.now()}`;
+    const newIndex = doorsList.length + 1;
+    const defaultWalls: WallSide[] = ['bottom', 'top', 'left', 'right'];
+    const chosenWall = defaultWalls[(newIndex - 1) % 4];
+    const newDoor: RoomDoor = {
+      id: newId,
+      label: `Door ${newIndex}`,
+      wall: chosenWall,
+      offset: 2,
+      swing: 'inward_left',
+      width: 2,
+    };
+    setDoorsList((prev) => [...prev, newDoor]);
+    setActiveDoorId(newId);
+  };
+
+  const handleDeleteDoor = (doorId: string) => {
+    const remaining = doorsList.filter((d) => d.id !== doorId);
+    setDoorsList(remaining);
+    if (activeDoorId === doorId) {
+      setActiveDoorId(remaining.length > 0 ? (remaining[0].id || '') : '');
+    }
+  };
+
   // Save Door Configuration
   const handleSaveDoor = async () => {
-    const newDoor: RoomDoor = {
-      wall: doorWall,
-      offset: Math.max(0, doorOffset),
-      swing: doorSwing,
-      width: doorWidth,
-    };
     await db.rooms.update(room.id, {
-      door: newDoor,
+      doors: doorsList,
+      door: doorsList[0] || undefined,
       updatedAt: Date.now(),
     });
     setRoomShapeModalOpen(false);
   };
 
-  const maxDoorOffset = doorWall === 'top' || doorWall === 'bottom'
-    ? Math.max(0, room.gridWidth - doorWidth)
-    : Math.max(0, room.gridHeight - doorWidth);
+  const maxDoorOffset = selectedDoor
+    ? (selectedDoor.wall === 'top' || selectedDoor.wall === 'bottom'
+        ? Math.max(0, room.gridWidth - (selectedDoor.width || 2))
+        : Math.max(0, room.gridHeight - (selectedDoor.width || 2)))
+    : 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm select-none animate-in fade-in duration-150">
@@ -417,7 +458,7 @@ export const RoomShapeModal: React.FC = () => {
             }`}
           >
             <DoorOpen className="w-3.5 h-3.5" />
-            <span>Door & Entrance</span>
+            <span>Doors ({doorsList.length})</span>
           </button>
         </div>
 
@@ -680,304 +721,377 @@ export const RoomShapeModal: React.FC = () => {
 
           {/* TAB 3: DOOR & ENTRANCE */}
           {activeTab === 'door' && (
-            <div className="space-y-4">
-              <div>
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                  Entrance Door & Opening
-                </span>
-                <p className="text-[11px] text-slate-400">
-                  Place entrance door on any wall, choose opening width, and set swing direction
-                </p>
+            <div className="space-y-4 animate-in fade-in duration-150">
+              {/* Header description */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                    Room Doors & Entrances
+                  </span>
+                  <p className="text-[11px] text-slate-400">
+                    Add, position, or configure multiple entrance or connecting doors
+                  </p>
+                </div>
+                <button
+                  onClick={handleAddDoor}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition-all active:scale-95 cursor-pointer"
+                  title="Add another door to this room"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Door</span>
+                </button>
               </div>
 
-              {/* Interactive Live Architectural Blueprint of Door on Room */}
-              <div className="p-3 bg-slate-900 rounded-2xl border border-slate-800 flex flex-col items-center shadow-inner">
-                <div className="w-full flex items-center justify-between text-[11px] font-bold text-slate-400 mb-2 px-1">
-                  <span className="flex items-center gap-1.5 text-slate-300">
-                    <DoorOpen className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Live Blueprint Preview</span>
+              {/* Multi-Door Selector Bar */}
+              <div className="bg-slate-50 rounded-2xl p-2.5 border border-slate-200/80">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <DoorOpen className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Doors ({doorsList.length})</span>
                   </span>
-                  <span className="text-amber-400 font-mono text-[10px]">
-                    Distance: {doorOffset}m • Door Width: {doorWidth}m
-                  </span>
-                </div>
-
-                <svg viewBox="0 0 280 130" className="w-full max-w-[280px] h-[130px] select-none">
-                  {/* Background grid */}
-                  <defs>
-                    <pattern id="modal-subtle-grid" width="14" height="14" patternUnits="userSpaceOnUse">
-                      <path d="M 14 0 L 0 0 0 14" fill="none" stroke="#334155" strokeWidth="0.5" opacity="0.4" />
-                    </pattern>
-                  </defs>
-                  <rect width="100%" height="100%" fill="url(#modal-subtle-grid)" rx="8" />
-
-                  {/* Room base floor */}
-                  <rect x="40" y="25" width="200" height="80" fill="#1e293b" rx="6" />
-
-                  {/* Wall Lines with Labels */}
-                  {/* Top Wall */}
-                  <line 
-                    x1="40" y1="25" x2="240" y2="25" 
-                    stroke={doorWall === 'top' ? '#3b82f6' : '#475569'} 
-                    strokeWidth={doorWall === 'top' ? '5' : '3'} 
-                  />
-                  <text x="140" y="18" fill={doorWall === 'top' ? '#60a5fa' : '#64748b'} fontSize="9" fontWeight="bold" textAnchor="middle">
-                    TOP WALL ({room.gridWidth}m)
-                  </text>
-
-                  {/* Bottom Wall */}
-                  <line 
-                    x1="40" y1="105" x2="240" y2="105" 
-                    stroke={doorWall === 'bottom' ? '#3b82f6' : '#475569'} 
-                    strokeWidth={doorWall === 'bottom' ? '5' : '3'} 
-                  />
-                  <text x="140" y="122" fill={doorWall === 'bottom' ? '#60a5fa' : '#64748b'} fontSize="9" fontWeight="bold" textAnchor="middle">
-                    BOTTOM WALL ({room.gridWidth}m)
-                  </text>
-
-                  {/* Left Wall */}
-                  <line 
-                    x1="40" y1="25" x2="40" y2="105" 
-                    stroke={doorWall === 'left' ? '#3b82f6' : '#475569'} 
-                    strokeWidth={doorWall === 'left' ? '5' : '3'} 
-                  />
-                  <text x="18" y="68" fill={doorWall === 'left' ? '#60a5fa' : '#64748b'} fontSize="9" fontWeight="bold" textAnchor="middle" transform="rotate(-90, 18, 68)">
-                    LEFT ({room.gridHeight}m)
-                  </text>
-
-                  {/* Right Wall */}
-                  <line 
-                    x1="240" y1="25" x2="240" y2="105" 
-                    stroke={doorWall === 'right' ? '#3b82f6' : '#475569'} 
-                    strokeWidth={doorWall === 'right' ? '5' : '3'} 
-                  />
-                  <text x="262" y="68" fill={doorWall === 'right' ? '#60a5fa' : '#64748b'} fontSize="9" fontWeight="bold" textAnchor="middle" transform="rotate(90, 262, 68)">
-                    RIGHT ({room.gridHeight}m)
-                  </text>
-
-                  {/* Door on active wall */}
-                  {(() => {
-                    const wallLen = doorWall === 'top' || doorWall === 'bottom' ? room.gridWidth : room.gridHeight;
-                    const fracOffset = wallLen > 0 ? doorOffset / wallLen : 0;
-                    const fracWidth = wallLen > 0 ? doorWidth / wallLen : 0.15;
-                    
-                    if (doorWall === 'bottom') {
-                      const dx1 = 40 + fracOffset * 200;
-                      const dx2 = Math.min(240, dx1 + fracWidth * 200);
-                      const dw = dx2 - dx1;
-                      const isLeftHinge = doorSwing.includes('left');
-                      const isInward = doorSwing.includes('inward');
-                      const hx = isLeftHinge ? dx1 : dx2;
-                      const hy = 105;
-                      const ly = isInward ? hy - dw : hy + dw;
-                      return (
-                        <g>
-                          <line x1={dx1} y1="105" x2={dx2} y2="105" stroke="#f59e0b" strokeWidth="6" />
-                          <line x1={hx} y1={hy} x2={hx} y2={ly} stroke="#fbbf24" strokeWidth="2.5" />
-                          <circle cx={hx} cy={hy} r="3" fill="#f59e0b" />
-                        </g>
-                      );
-                    } else if (doorWall === 'top') {
-                      const dx1 = 40 + fracOffset * 200;
-                      const dx2 = Math.min(240, dx1 + fracWidth * 200);
-                      const dw = dx2 - dx1;
-                      const isLeftHinge = doorSwing.includes('left');
-                      const isInward = doorSwing.includes('inward');
-                      const hx = isLeftHinge ? dx1 : dx2;
-                      const hy = 25;
-                      const ly = isInward ? hy + dw : hy - dw;
-                      return (
-                        <g>
-                          <line x1={dx1} y1="25" x2={dx2} y2="25" stroke="#f59e0b" strokeWidth="6" />
-                          <line x1={hx} y1={hy} x2={hx} y2={ly} stroke="#fbbf24" strokeWidth="2.5" />
-                          <circle cx={hx} cy={hy} r="3" fill="#f59e0b" />
-                        </g>
-                      );
-                    } else if (doorWall === 'left') {
-                      const dy1 = 25 + fracOffset * 80;
-                      const dy2 = Math.min(105, dy1 + fracWidth * 80);
-                      const dw = dy2 - dy1;
-                      const isLeftHinge = doorSwing.includes('left');
-                      const isInward = doorSwing.includes('inward');
-                      const hy = isLeftHinge ? dy1 : dy2;
-                      const hx = 40;
-                      const lx = isInward ? hx + dw : hx - dw;
-                      return (
-                        <g>
-                          <line x1="40" y1={dy1} x2="40" y2={dy2} stroke="#f59e0b" strokeWidth="6" />
-                          <line x1={hx} y1={hy} x2={lx} y2={hy} stroke="#fbbf24" strokeWidth="2.5" />
-                          <circle cx={hx} cy={hy} r="3" fill="#f59e0b" />
-                        </g>
-                      );
-                    } else {
-                      // right
-                      const dy1 = 25 + fracOffset * 80;
-                      const dy2 = Math.min(105, dy1 + fracWidth * 80);
-                      const dw = dy2 - dy1;
-                      const isLeftHinge = doorSwing.includes('left');
-                      const isInward = doorSwing.includes('inward');
-                      const hy = isLeftHinge ? dy1 : dy2;
-                      const hx = 240;
-                      const lx = isInward ? hx - dw : hx + dw;
-                      return (
-                        <g>
-                          <line x1="240" y1={dy1} x2="240" y2={dy2} stroke="#f59e0b" strokeWidth="6" />
-                          <line x1={hx} y1={hy} x2={lx} y2={hy} stroke="#fbbf24" strokeWidth="2.5" />
-                          <circle cx={hx} cy={hy} r="3" fill="#f59e0b" />
-                        </g>
-                      );
-                    }
-                  })()}
-                </svg>
-              </div>
-
-              {/* 1. Door Width / Opening Size */}
-              <div>
-                <div className="flex items-center justify-between text-xs font-bold mb-1.5">
-                  <span className="text-slate-700">1. Door Opening Width</span>
-                  <span className="font-mono text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">
-                    {doorWidth}m width
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { w: 1, title: 'Single Door', sub: '1m / 3.3ft' },
-                    { w: 2, title: 'Wide Entry', sub: '2m / 6.6ft' },
-                    { w: 3, title: 'Double Doors', sub: '3m / 10ft' },
-                  ].map((item) => (
+                  {selectedDoor && (
                     <button
-                      key={item.w}
-                      onClick={() => {
-                        setDoorWidth(item.w);
-                        const wallLen = doorWall === 'top' || doorWall === 'bottom' ? room.gridWidth : room.gridHeight;
-                        if (doorOffset + item.w > wallLen) {
-                          setDoorOffset(Math.max(0, wallLen - item.w));
+                      onClick={() => handleDeleteDoor(selectedDoor.id || '')}
+                      className="flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                      title="Remove selected door"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Delete Door</span>
+                    </button>
+                  )}
+                </div>
+
+                {doorsList.length > 0 ? (
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                    {doorsList.map((d, idx) => {
+                      const isSelected = d.id === selectedDoor?.id;
+                      return (
+                        <button
+                          key={d.id || idx}
+                          onClick={() => setActiveDoorId(d.id || '')}
+                          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                            isSelected
+                              ? 'bg-amber-500 text-white shadow-md shadow-amber-500/25 ring-2 ring-amber-300'
+                              : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+                          }`}
+                        >
+                          <DoorOpen className={`w-3.5 h-3.5 ${isSelected ? 'text-white' : 'text-amber-500'}`} />
+                          <span>{d.label || `Door ${idx + 1}`}</span>
+                          <span className={`text-[10px] font-mono px-1 rounded uppercase ${isSelected ? 'bg-amber-600 text-amber-100' : 'bg-slate-100 text-slate-400'}`}>
+                            {d.wall}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center py-3 text-xs text-slate-400 font-medium">
+                    No doors in this room. Click "+ Add Door" to add an entrance.
+                  </div>
+                )}
+              </div>
+
+              {selectedDoor && (
+                <>
+                  {/* Door Name Input */}
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-bold text-slate-700 whitespace-nowrap">
+                      Door Name:
+                    </label>
+                    <input
+                      type="text"
+                      value={selectedDoor.label || ''}
+                      onChange={(e) => updateSelectedDoor({ label: e.target.value })}
+                      placeholder="e.g. Main Entrance, Balcony, Bathroom"
+                      className="flex-1 text-xs px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  {/* Interactive Live Architectural Blueprint of All Doors on Room */}
+                  <div className="p-3 bg-slate-900 rounded-2xl border border-slate-800 flex flex-col items-center shadow-inner">
+                    <div className="w-full flex items-center justify-between text-[11px] font-bold text-slate-400 mb-2 px-1">
+                      <span className="flex items-center gap-1.5 text-slate-300">
+                        <DoorOpen className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Live Blueprint Preview</span>
+                      </span>
+                      <span className="text-amber-400 font-mono text-[10px]">
+                        Active: {selectedDoor.label || 'Door'} ({selectedDoor.offset}m on {selectedDoor.wall} wall)
+                      </span>
+                    </div>
+
+                    <svg viewBox="0 0 280 130" className="w-full max-w-[280px] h-[130px] select-none">
+                      {/* Background grid */}
+                      <defs>
+                        <pattern id="modal-subtle-grid" width="14" height="14" patternUnits="userSpaceOnUse">
+                          <path d="M 14 0 L 0 0 0 14" fill="none" stroke="#334155" strokeWidth="0.5" opacity="0.4" />
+                        </pattern>
+                      </defs>
+                      <rect width="100%" height="100%" fill="url(#modal-subtle-grid)" rx="8" />
+
+                      {/* Room base floor */}
+                      <rect x="40" y="25" width="200" height="80" fill="#1e293b" rx="6" />
+
+                      {/* Wall Lines with Labels */}
+                      {/* Top Wall */}
+                      <line 
+                        x1="40" y1="25" x2="240" y2="25" 
+                        stroke={selectedDoor.wall === 'top' ? '#3b82f6' : '#475569'} 
+                        strokeWidth={selectedDoor.wall === 'top' ? '5' : '3'} 
+                      />
+                      <text x="140" y="18" fill={selectedDoor.wall === 'top' ? '#60a5fa' : '#64748b'} fontSize="9" fontWeight="bold" textAnchor="middle">
+                        TOP ({room.gridWidth}m)
+                      </text>
+
+                      {/* Bottom Wall */}
+                      <line 
+                        x1="40" y1="105" x2="240" y2="105" 
+                        stroke={selectedDoor.wall === 'bottom' ? '#3b82f6' : '#475569'} 
+                        strokeWidth={selectedDoor.wall === 'bottom' ? '5' : '3'} 
+                      />
+                      <text x="140" y="122" fill={selectedDoor.wall === 'bottom' ? '#60a5fa' : '#64748b'} fontSize="9" fontWeight="bold" textAnchor="middle">
+                        BOTTOM ({room.gridWidth}m)
+                      </text>
+
+                      {/* Left Wall */}
+                      <line 
+                        x1="40" y1="25" x2="40" y2="105" 
+                        stroke={selectedDoor.wall === 'left' ? '#3b82f6' : '#475569'} 
+                        strokeWidth={selectedDoor.wall === 'left' ? '5' : '3'} 
+                      />
+                      <text x="18" y="68" fill={selectedDoor.wall === 'left' ? '#60a5fa' : '#64748b'} fontSize="9" fontWeight="bold" textAnchor="middle" transform="rotate(-90, 18, 68)">
+                        LEFT ({room.gridHeight}m)
+                      </text>
+
+                      {/* Right Wall */}
+                      <line 
+                        x1="240" y1="25" x2="240" y2="105" 
+                        stroke={selectedDoor.wall === 'right' ? '#3b82f6' : '#475569'} 
+                        strokeWidth={selectedDoor.wall === 'right' ? '5' : '3'} 
+                      />
+                      <text x="262" y="68" fill={selectedDoor.wall === 'right' ? '#60a5fa' : '#64748b'} fontSize="9" fontWeight="bold" textAnchor="middle" transform="rotate(90, 262, 68)">
+                        RIGHT ({room.gridHeight}m)
+                      </text>
+
+                      {/* Render All Doors in Blueprint */}
+                      {doorsList.map((d, idx) => {
+                        const isSelected = d.id === selectedDoor.id;
+                        const wallLen = d.wall === 'top' || d.wall === 'bottom' ? room.gridWidth : room.gridHeight;
+                        const fracOffset = wallLen > 0 ? d.offset / wallLen : 0;
+                        const fracWidth = wallLen > 0 ? (d.width || 2) / wallLen : 0.15;
+                        const swing = d.swing || 'inward_left';
+                        const isLeftHinge = swing.includes('left');
+                        const isInward = swing.includes('inward');
+                        const strokeColor = isSelected ? '#f59e0b' : '#38bdf8';
+                        const leafColor = isSelected ? '#fbbf24' : '#7dd3fc';
+
+                        if (d.wall === 'bottom') {
+                          const dx1 = 40 + fracOffset * 200;
+                          const dx2 = Math.min(240, dx1 + fracWidth * 200);
+                          const dw = dx2 - dx1;
+                          const hx = isLeftHinge ? dx1 : dx2;
+                          const hy = 105;
+                          const ly = isInward ? hy - dw : hy + dw;
+                          return (
+                            <g key={d.id || idx} onClick={() => setActiveDoorId(d.id || '')} className="cursor-pointer">
+                              <line x1={dx1} y1="105" x2={dx2} y2="105" stroke={strokeColor} strokeWidth={isSelected ? 6 : 4} />
+                              <line x1={hx} y1={hy} x2={hx} y2={ly} stroke={leafColor} strokeWidth="2.5" />
+                              <circle cx={hx} cy={hy} r={isSelected ? 3.5 : 2.5} fill={strokeColor} />
+                            </g>
+                          );
+                        } else if (d.wall === 'top') {
+                          const dx1 = 40 + fracOffset * 200;
+                          const dx2 = Math.min(240, dx1 + fracWidth * 200);
+                          const dw = dx2 - dx1;
+                          const hx = isLeftHinge ? dx1 : dx2;
+                          const hy = 25;
+                          const ly = isInward ? hy + dw : hy - dw;
+                          return (
+                            <g key={d.id || idx} onClick={() => setActiveDoorId(d.id || '')} className="cursor-pointer">
+                              <line x1={dx1} y1="25" x2={dx2} y2="25" stroke={strokeColor} strokeWidth={isSelected ? 6 : 4} />
+                              <line x1={hx} y1={hy} x2={hx} y2={ly} stroke={leafColor} strokeWidth="2.5" />
+                              <circle cx={hx} cy={hy} r={isSelected ? 3.5 : 2.5} fill={strokeColor} />
+                            </g>
+                          );
+                        } else if (d.wall === 'left') {
+                          const dy1 = 25 + fracOffset * 80;
+                          const dy2 = Math.min(105, dy1 + fracWidth * 80);
+                          const dw = dy2 - dy1;
+                          const hy = isLeftHinge ? dy1 : dy2;
+                          const hx = 40;
+                          const lx = isInward ? hx + dw : hx - dw;
+                          return (
+                            <g key={d.id || idx} onClick={() => setActiveDoorId(d.id || '')} className="cursor-pointer">
+                              <line x1="40" y1={dy1} x2="40" y2={dy2} stroke={strokeColor} strokeWidth={isSelected ? 6 : 4} />
+                              <line x1={hx} y1={hy} x2={lx} y2={hy} stroke={leafColor} strokeWidth="2.5" />
+                              <circle cx={hx} cy={hy} r={isSelected ? 3.5 : 2.5} fill={strokeColor} />
+                            </g>
+                          );
+                        } else {
+                          // right
+                          const dy1 = 25 + fracOffset * 80;
+                          const dy2 = Math.min(105, dy1 + fracWidth * 80);
+                          const dw = dy2 - dy1;
+                          const hy = isLeftHinge ? dy1 : dy2;
+                          const hx = 240;
+                          const lx = isInward ? hx - dw : hx + dw;
+                          return (
+                            <g key={d.id || idx} onClick={() => setActiveDoorId(d.id || '')} className="cursor-pointer">
+                              <line x1="240" y1={dy1} x2="240" y2={dy2} stroke={strokeColor} strokeWidth={isSelected ? 6 : 4} />
+                              <line x1={hx} y1={hy} x2={lx} y2={hy} stroke={leafColor} strokeWidth="2.5" />
+                              <circle cx={hx} cy={hy} r={isSelected ? 3.5 : 2.5} fill={strokeColor} />
+                            </g>
+                          );
                         }
-                      }}
-                      className={`py-2 px-2 rounded-xl text-center cursor-pointer transition-all ${
-                        doorWidth === item.w
-                          ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
-                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                      }`}
-                    >
-                      <div className="text-xs font-bold leading-tight">{item.title}</div>
-                      <div className={`text-[10px] ${doorWidth === item.w ? 'text-blue-100' : 'text-slate-400'}`}>
-                        {item.sub}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
+                      })}
+                    </svg>
+                  </div>
 
-              {/* 2. Wall Selection */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  2. Select Wall
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {[
-                    { id: 'top' as WallSide, label: '⬆ Top Wall', len: room.gridWidth },
-                    { id: 'bottom' as WallSide, label: '⬇ Bottom Wall', len: room.gridWidth },
-                    { id: 'left' as WallSide, label: '⬅ Left Wall', len: room.gridHeight },
-                    { id: 'right' as WallSide, label: '➡ Right Wall', len: room.gridHeight },
-                  ].map((w) => (
-                    <button
-                      key={w.id}
-                      onClick={() => {
-                        setDoorWall(w.id);
-                        if (doorOffset + doorWidth > w.len) {
-                          setDoorOffset(Math.max(0, w.len - doorWidth));
-                        }
-                      }}
-                      className={`py-2 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                        doorWall === w.id
-                          ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
-                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                      }`}
-                    >
-                      <div>{w.label}</div>
-                      <div className={`text-[10px] font-normal ${doorWall === w.id ? 'text-blue-100' : 'text-slate-400'}`}>
-                        {w.len}m long
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
+                  {/* 1. Door Width / Opening Size */}
+                  <div>
+                    <div className="flex items-center justify-between text-xs font-bold mb-1.5">
+                      <span className="text-slate-700">1. Door Opening Width</span>
+                      <span className="font-mono text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">
+                        {selectedDoor.width || 2}m width
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { w: 1, title: 'Single Door', sub: '1m / 3.3ft' },
+                        { w: 2, title: 'Wide Entry', sub: '2m / 6.6ft' },
+                        { w: 3, title: 'Double Doors', sub: '3m / 10ft' },
+                      ].map((item) => (
+                        <button
+                          key={item.w}
+                          onClick={() => {
+                            const wallLen = selectedDoor.wall === 'top' || selectedDoor.wall === 'bottom' ? room.gridWidth : room.gridHeight;
+                            const newOffset = selectedDoor.offset + item.w > wallLen ? Math.max(0, wallLen - item.w) : selectedDoor.offset;
+                            updateSelectedDoor({ width: item.w, offset: newOffset });
+                          }}
+                          className={`py-2 px-2 rounded-xl text-center cursor-pointer transition-all ${
+                            (selectedDoor.width || 2) === item.w
+                              ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                          }`}
+                        >
+                          <div className="text-xs font-bold leading-tight">{item.title}</div>
+                          <div className={`text-[10px] ${(selectedDoor.width || 2) === item.w ? 'text-blue-100' : 'text-slate-400'}`}>
+                            {item.sub}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
-              {/* 3. Position Along Wall */}
-              <div>
-                <div className="flex items-center justify-between text-xs font-bold mb-1.5">
-                  <span className="text-slate-700">3. Distance from Wall Corner</span>
-                  <span className="font-mono text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">
-                    {doorOffset}m from corner
-                  </span>
-                </div>
+                  {/* 2. Wall Selection */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                      2. Select Wall
+                    </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {[
+                        { id: 'top' as WallSide, label: '⬆ Top Wall', len: room.gridWidth },
+                        { id: 'bottom' as WallSide, label: '⬇ Bottom Wall', len: room.gridWidth },
+                        { id: 'left' as WallSide, label: '⬅ Left Wall', len: room.gridHeight },
+                        { id: 'right' as WallSide, label: '➡ Right Wall', len: room.gridHeight },
+                      ].map((w) => (
+                        <button
+                          key={w.id}
+                          onClick={() => {
+                            const curWidth = selectedDoor.width || 2;
+                            const newOffset = selectedDoor.offset + curWidth > w.len ? Math.max(0, w.len - curWidth) : selectedDoor.offset;
+                            updateSelectedDoor({ wall: w.id, offset: newOffset });
+                          }}
+                          className={`py-2 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            selectedDoor.wall === w.id
+                              ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                          }`}
+                        >
+                          <div>{w.label}</div>
+                          <div className={`text-[10px] font-normal ${selectedDoor.wall === w.id ? 'text-blue-100' : 'text-slate-400'}`}>
+                            {w.len}m long
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
-                {/* Quick Presets */}
-                <div className="flex gap-1.5 mb-2">
-                  <button
-                    onClick={() => setDoorOffset(Math.min(1, maxDoorOffset))}
-                    className="flex-1 py-1 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-bold text-slate-600 cursor-pointer"
-                  >
-                    Start (1m)
-                  </button>
-                  <button
-                    onClick={() => setDoorOffset(Math.round(maxDoorOffset / 2))}
-                    className="flex-1 py-1 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-bold text-slate-600 cursor-pointer"
-                  >
-                    Centered ({Math.round(maxDoorOffset / 2)}m)
-                  </button>
-                  <button
-                    onClick={() => setDoorOffset(Math.max(0, maxDoorOffset - 1))}
-                    className="flex-1 py-1 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-bold text-slate-600 cursor-pointer"
-                  >
-                    End ({Math.max(0, maxDoorOffset - 1)}m)
-                  </button>
-                </div>
+                  {/* 3. Position Along Wall */}
+                  <div>
+                    <div className="flex items-center justify-between text-xs font-bold mb-1.5">
+                      <span className="text-slate-700">3. Distance from Wall Corner</span>
+                      <span className="font-mono text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">
+                        {selectedDoor.offset}m from corner
+                      </span>
+                    </div>
 
-                <input
-                  type="range"
-                  min={0}
-                  max={maxDoorOffset}
-                  value={doorOffset}
-                  onChange={(e) => setDoorOffset(parseInt(e.target.value, 10) || 0)}
-                  className="w-full accent-blue-600 cursor-pointer"
-                />
-                <div className="flex justify-between text-[10px] font-bold text-slate-400 font-mono mt-1">
-                  <span>0m (corner)</span>
-                  <span className="text-slate-500 font-medium">
-                    Spans {doorOffset}m to {doorOffset + doorWidth}m
-                  </span>
-                  <span>{maxDoorOffset}m</span>
-                </div>
-              </div>
+                    {/* Quick Presets */}
+                    <div className="flex gap-1.5 mb-2">
+                      <button
+                        onClick={() => updateSelectedDoor({ offset: Math.min(1, maxDoorOffset) })}
+                        className="flex-1 py-1 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-bold text-slate-600 cursor-pointer"
+                      >
+                        Start (1m)
+                      </button>
+                      <button
+                        onClick={() => updateSelectedDoor({ offset: Math.round(maxDoorOffset / 2) })}
+                        className="flex-1 py-1 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-bold text-slate-600 cursor-pointer"
+                      >
+                        Centered ({Math.round(maxDoorOffset / 2)}m)
+                      </button>
+                      <button
+                        onClick={() => updateSelectedDoor({ offset: Math.max(0, maxDoorOffset - 1) })}
+                        className="flex-1 py-1 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-bold text-slate-600 cursor-pointer"
+                      >
+                        End ({Math.max(0, maxDoorOffset - 1)}m)
+                      </button>
+                    </div>
 
-              {/* 4. Door Swing Direction */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  4. Door Swing Direction
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { id: 'inward_left', label: 'Inward (Left Hinge)' },
-                    { id: 'inward_right', label: 'Inward (Right Hinge)' },
-                    { id: 'outward_left', label: 'Outward (Left Hinge)' },
-                    { id: 'outward_right', label: 'Outward (Right Hinge)' },
-                  ].map((s) => (
-                    <button
-                      key={s.id}
-                      onClick={() => setDoorSwing(s.id as DoorSwing)}
-                      className={`py-2 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                        doorSwing === s.id
-                          ? 'bg-blue-600 text-white shadow-xs'
-                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                      }`}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={maxDoorOffset}
+                      value={selectedDoor.offset}
+                      onChange={(e) => updateSelectedDoor({ offset: parseInt(e.target.value, 10) || 0 })}
+                      className="w-full accent-blue-600 cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[10px] font-bold text-slate-400 font-mono mt-1">
+                      <span>0m (corner)</span>
+                      <span className="text-slate-500 font-medium">
+                        Spans {selectedDoor.offset}m to {selectedDoor.offset + (selectedDoor.width || 2)}m
+                      </span>
+                      <span>{maxDoorOffset}m</span>
+                    </div>
+                  </div>
+
+                  {/* 4. Door Swing Direction */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                      4. Door Swing Direction
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { id: 'inward_left', label: 'Inward (Left Hinge)' },
+                        { id: 'inward_right', label: 'Inward (Right Hinge)' },
+                        { id: 'outward_left', label: 'Outward (Left Hinge)' },
+                        { id: 'outward_right', label: 'Outward (Right Hinge)' },
+                      ].map((s) => (
+                        <button
+                          key={s.id}
+                          onClick={() => updateSelectedDoor({ swing: s.id as DoorSwing })}
+                          className={`py-2 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            selectedDoor.swing === s.id
+                              ? 'bg-blue-600 text-white shadow-xs'
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                          }`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
 
               <div className="flex justify-end pt-2">
                 <button
@@ -985,7 +1099,7 @@ export const RoomShapeModal: React.FC = () => {
                   className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
                 >
                   <Check className="w-4 h-4" />
-                  <span>Save Door Placement</span>
+                  <span>Save Doors ({doorsList.length})</span>
                 </button>
               </div>
             </div>

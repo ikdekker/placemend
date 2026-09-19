@@ -1,5 +1,5 @@
 import { db } from '../db/database';
-import { RoomDoor, WallSide, Point2D, DoorSwing } from '../types';
+import { Room, RoomDoor, WallSide, Point2D, DoorSwing } from '../types';
 
 export interface DoorSvgGeometry {
   arcD: string;
@@ -8,6 +8,39 @@ export interface DoorSvgGeometry {
   hingePoint: { x: number; y: number };
   jambs: Array<{ x: number; y: number; w: number; h: number }>;
   badgePos: { x: number; y: number; wall: WallSide };
+}
+
+/**
+ * Normalizes all doors for a room, providing backwards-compatibility with single door.
+ */
+export function getRoomDoors(room: Room | undefined | null): RoomDoor[] {
+  if (!room) return [];
+  if (room.doors && room.doors.length > 0) {
+    return room.doors.map((d, idx) => ({
+      ...d,
+      id: d.id || `door-${idx + 1}`,
+      label: d.label || (idx === 0 ? 'Main Entrance' : `Door ${idx + 1}`),
+      swing: d.swing || 'inward_left',
+      width: d.width || 2,
+    }));
+  }
+  if (room.door) {
+    return [{
+      ...room.door,
+      id: room.door.id || 'door-1',
+      label: room.door.label || 'Main Entrance',
+      swing: room.door.swing || 'inward_left',
+      width: room.door.width || 2,
+    }];
+  }
+  return [{
+    id: 'door-1',
+    label: 'Main Entrance',
+    wall: 'bottom',
+    offset: 2,
+    swing: 'inward_left',
+    width: 2,
+  }];
 }
 
 /**
@@ -204,23 +237,25 @@ export async function rotateRoom90Clockwise(roomId: string): Promise<void> {
     }));
   }
 
-  // 2. Rotate door
-  const currentDoor = room.door || { wall: 'bottom', offset: 2, swing: 'inward_left', width: 2 };
+  // 2. Rotate all doors
+  const currentDoors = getRoomDoors(room);
   const wallCycle: Record<WallSide, WallSide> = {
     top: 'right',
     right: 'bottom',
     bottom: 'left',
     left: 'top',
   };
-  const newWall = wallCycle[currentDoor.wall];
-  const maxWallLen = newWall === 'top' || newWall === 'bottom' ? newW : newH;
-  const doorWidth = currentDoor.width || 2;
-  const newOffset = Math.min(Math.max(0, maxWallLen - doorWidth), currentDoor.offset);
-  const newDoor: RoomDoor = {
-    ...currentDoor,
-    wall: newWall,
-    offset: newOffset,
-  };
+  const newDoors: RoomDoor[] = currentDoors.map((d) => {
+    const newWall = wallCycle[d.wall];
+    const maxWallLen = newWall === 'top' || newWall === 'bottom' ? newW : newH;
+    const doorWidth = d.width || 2;
+    const newOffset = Math.min(Math.max(0, maxWallLen - doorWidth), d.offset);
+    return {
+      ...d,
+      wall: newWall,
+      offset: newOffset,
+    };
+  });
 
   // 3. Rotate all furniture in the room to remain inside bounds
   const furnitureInRoom = await db.furniture.where('roomId').equals(room.id).toArray();
@@ -245,20 +280,25 @@ export async function rotateRoom90Clockwise(roomId: string): Promise<void> {
       gridWidth: newW,
       gridHeight: newH,
       polygonPoints: newPoints,
-      door: newDoor,
+      doors: newDoors,
+      door: newDoors[0] || undefined,
       updatedAt: Date.now(),
     });
   });
 }
 
 /**
- * Nudges or moves the room door along its current wall.
+ * Nudges or moves a room door along its current wall.
  */
-export async function nudgeDoor(roomId: string, deltaUnits: number): Promise<void> {
+export async function nudgeDoor(roomId: string, deltaUnits: number, doorId?: string): Promise<void> {
   const room = await db.rooms.get(roomId);
   if (!room) return;
 
-  const currentDoor = room.door || { wall: 'bottom', offset: 2, swing: 'inward_left', width: 2 };
+  const doors = getRoomDoors(room);
+  const targetIdx = doorId ? doors.findIndex((d) => d.id === doorId) : 0;
+  if (targetIdx === -1) return;
+
+  const currentDoor = doors[targetIdx];
   const wall = currentDoor.wall || 'bottom';
   const width = currentDoor.width || 2;
   const maxOffset = wall === 'top' || wall === 'bottom'
@@ -266,11 +306,14 @@ export async function nudgeDoor(roomId: string, deltaUnits: number): Promise<voi
     : Math.max(0, room.gridHeight - width);
 
   const newOffset = Math.max(0, Math.min(maxOffset, currentDoor.offset + deltaUnits));
+  doors[targetIdx] = {
+    ...currentDoor,
+    offset: newOffset,
+  };
+
   await db.rooms.update(roomId, {
-    door: {
-      ...currentDoor,
-      offset: newOffset,
-    },
+    doors,
+    door: doors[0] || undefined,
     updatedAt: Date.now(),
   });
 }
@@ -278,7 +321,7 @@ export async function nudgeDoor(roomId: string, deltaUnits: number): Promise<voi
 /**
  * Mirrors (flips) an entire room along either the horizontal or vertical axis:
  * 1. Polygon vertices (flipped coordinates and reversed winding)
- * 2. Entrance door position, wall side, and swing hinge
+ * 2. All entrance door positions, wall sides, and swing hinges
  * 3. All interior furniture positions and orientations
  */
 export async function mirrorRoom(roomId: string, axis: 'horizontal' | 'vertical'): Promise<void> {
@@ -304,13 +347,8 @@ export async function mirrorRoom(roomId: string, axis: 'horizontal' | 'vertical'
     }
   }
 
-  // 2. Mirror door
-  const currentDoor = room.door || { wall: 'bottom', offset: 2, swing: 'inward_left', width: 2 };
-  const doorWidth = currentDoor.width || 2;
-  let newWall = currentDoor.wall;
-  let newOffset = currentDoor.offset;
-  let newSwing = currentDoor.swing || 'inward_left';
-
+  // 2. Mirror all doors
+  const currentDoors = getRoomDoors(room);
   const flipSwingMap: Record<DoorSwing, DoorSwing> = {
     'inward_left': 'inward_right',
     'inward_right': 'inward_left',
@@ -318,37 +356,44 @@ export async function mirrorRoom(roomId: string, axis: 'horizontal' | 'vertical'
     'outward_right': 'outward_left',
   };
 
-  if (axis === 'horizontal') {
-    if (currentDoor.wall === 'top' || currentDoor.wall === 'bottom') {
-      newOffset = Math.max(0, W - currentDoor.offset - doorWidth);
-      newSwing = flipSwingMap[newSwing] || newSwing;
-    } else if (currentDoor.wall === 'left') {
-      newWall = 'right';
-      newSwing = flipSwingMap[newSwing] || newSwing;
-    } else if (currentDoor.wall === 'right') {
-      newWall = 'left';
-      newSwing = flipSwingMap[newSwing] || newSwing;
-    }
-  } else {
-    // vertical flip
-    if (currentDoor.wall === 'left' || currentDoor.wall === 'right') {
-      newOffset = Math.max(0, H - currentDoor.offset - doorWidth);
-      newSwing = flipSwingMap[newSwing] || newSwing;
-    } else if (currentDoor.wall === 'top') {
-      newWall = 'bottom';
-      newSwing = flipSwingMap[newSwing] || newSwing;
-    } else if (currentDoor.wall === 'bottom') {
-      newWall = 'top';
-      newSwing = flipSwingMap[newSwing] || newSwing;
-    }
-  }
+  const newDoors: RoomDoor[] = currentDoors.map((currentDoor) => {
+    const doorWidth = currentDoor.width || 2;
+    let newWall = currentDoor.wall;
+    let newOffset = currentDoor.offset;
+    let newSwing = currentDoor.swing || 'inward_left';
 
-  const newDoor: RoomDoor = {
-    ...currentDoor,
-    wall: newWall,
-    offset: newOffset,
-    swing: newSwing,
-  };
+    if (axis === 'horizontal') {
+      if (currentDoor.wall === 'top' || currentDoor.wall === 'bottom') {
+        newOffset = Math.max(0, W - currentDoor.offset - doorWidth);
+        newSwing = flipSwingMap[newSwing] || newSwing;
+      } else if (currentDoor.wall === 'left') {
+        newWall = 'right';
+        newSwing = flipSwingMap[newSwing] || newSwing;
+      } else if (currentDoor.wall === 'right') {
+        newWall = 'left';
+        newSwing = flipSwingMap[newSwing] || newSwing;
+      }
+    } else {
+      // vertical flip
+      if (currentDoor.wall === 'left' || currentDoor.wall === 'right') {
+        newOffset = Math.max(0, H - currentDoor.offset - doorWidth);
+        newSwing = flipSwingMap[newSwing] || newSwing;
+      } else if (currentDoor.wall === 'top') {
+        newWall = 'bottom';
+        newSwing = flipSwingMap[newSwing] || newSwing;
+      } else if (currentDoor.wall === 'bottom') {
+        newWall = 'top';
+        newSwing = flipSwingMap[newSwing] || newSwing;
+      }
+    }
+
+    return {
+      ...currentDoor,
+      wall: newWall,
+      offset: newOffset,
+      swing: newSwing,
+    };
+  });
 
   // 3. Mirror all interior furniture
   const furnitureInRoom = await db.furniture.where('roomId').equals(room.id).toArray();
@@ -380,7 +425,8 @@ export async function mirrorRoom(roomId: string, axis: 'horizontal' | 'vertical'
 
     await db.rooms.update(room.id, {
       polygonPoints: newPoints,
-      door: newDoor,
+      doors: newDoors,
+      door: newDoors[0] || undefined,
       updatedAt: Date.now(),
     });
   });

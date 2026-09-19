@@ -14,6 +14,8 @@ export type WallSide = 'top' | 'bottom' | 'left' | 'right';
 export type DoorSwing = 'inward_left' | 'inward_right' | 'outward_left' | 'outward_right';
 
 export type RoomDoor = {
+  id?: string;
+  label?: string;
   wall: WallSide;
   offset: number; // grid units from start of wall
   swing?: DoorSwing;
@@ -52,7 +54,8 @@ export type Room = {
   unitSize: number; // pixels per grid cell
   shapeType?: RoomShapeType;
   polygonPoints?: Point2D[]; // Explicit corner points in grid units for non-rectangular rooms
-  door?: RoomDoor;
+  door?: RoomDoor; // Legacy single door
+  doors?: RoomDoor[]; // Multiple doors
   createdAt: number;
   updatedAt: number;
 };
