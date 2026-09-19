@@ -21,10 +21,17 @@ export const ItemModal: React.FC = () => {
   const [favorite, setFavorite] = useState(false);
   const [photoDataUrl, setPhotoDataUrl] = useState<string | undefined>(undefined);
 
+  const [targetContainerId, setTargetContainerId] = useState<string>('');
+
   const container = useLiveQuery(async () => {
     if (!selectedContainerId) return undefined;
     return await db.containers.get(selectedContainerId);
   }, [selectedContainerId]);
+
+  const furnitureContainers = useLiveQuery(async () => {
+    if (!container?.furnitureId) return [];
+    return await db.containers.where('furnitureId').equals(container.furnitureId).toArray();
+  }, [container?.furnitureId]) || [];
 
   useEffect(() => {
     if (editingItemId) {
@@ -37,6 +44,7 @@ export const ItemModal: React.FC = () => {
           setTagsInput((item.tags || []).join(', '));
           setFavorite(!!item.favorite);
           setPhotoDataUrl(item.photoDataUrl);
+          setTargetContainerId(item.containerId);
         }
       });
     } else {
@@ -47,8 +55,9 @@ export const ItemModal: React.FC = () => {
       setTagsInput('');
       setFavorite(false);
       setPhotoDataUrl(undefined);
+      setTargetContainerId(selectedContainerId || '');
     }
-  }, [editingItemId, isItemModalOpen]);
+  }, [editingItemId, isItemModalOpen, selectedContainerId]);
 
   if (!isItemModalOpen) return null;
 
@@ -72,8 +81,15 @@ export const ItemModal: React.FC = () => {
       .map((t) => t.trim().toLowerCase())
       .filter(Boolean);
 
+    const assignedContainerId = targetContainerId || selectedContainerId;
+    if (!assignedContainerId) {
+      alert('Please select a storage container.');
+      return;
+    }
+
     if (editingItemId) {
       await db.items.update(editingItemId, {
+        containerId: assignedContainerId,
         name: name.trim(),
         description: description.trim(),
         quantity: Math.max(1, Number(quantity) || 1),
@@ -84,14 +100,9 @@ export const ItemModal: React.FC = () => {
         updatedAt: Date.now(),
       });
     } else {
-      if (!selectedContainerId) {
-        alert('Please select a shelf or drawer first.');
-        return;
-      }
-
       const newItem: Item = {
         id: `item-${Date.now()}`,
-        containerId: selectedContainerId,
+        containerId: assignedContainerId,
         name: name.trim(),
         description: description.trim(),
         quantity: Math.max(1, Number(quantity) || 1),
@@ -160,6 +171,26 @@ export const ItemModal: React.FC = () => {
               className="w-full bg-slate-800 text-white text-sm px-3 py-2 rounded-xl border border-slate-700 focus:outline-none focus:border-blue-500 resize-none"
             />
           </div>
+
+          {/* Location Selector (when multiple containers/compartments exist) */}
+          {furnitureContainers.length > 1 && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Storage Location / Divider
+              </label>
+              <select
+                value={targetContainerId || selectedContainerId || ''}
+                onChange={(e) => setTargetContainerId(e.target.value)}
+                className="w-full bg-slate-800 text-white text-sm px-3 py-2 rounded-xl border border-slate-700 focus:outline-none focus:border-blue-500"
+              >
+                {furnitureContainers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.parentContainerId ? `↳ Divider: ${c.name}` : `Drawer/Shelf: ${c.name}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Quantity & Category Row */}
           <div className="grid grid-cols-2 gap-3">
