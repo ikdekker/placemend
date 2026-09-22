@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
@@ -241,6 +241,8 @@ export const RoomShapeModal: React.FC = () => {
   // Local state for custom polygon editing
   const [customPoints, setCustomPoints] = useState<Point2D[]>([]);
   const [hasInitializedCustom, setHasInitializedCustom] = useState(false);
+  const [draggingPointIdx, setDraggingPointIdx] = useState<number | null>(null);
+  const customSvgRef = useRef<SVGSVGElement | null>(null);
 
   // Local state for multi-door editing
   const [doorsList, setDoorsList] = useState<RoomDoor[]>([]);
@@ -282,6 +284,60 @@ export const RoomShapeModal: React.FC = () => {
       }
     }
   }, [room, isRoomShapeModalOpen, hasInitializedCustom, hasInitializedDoors]);
+
+  // Convert screen coordinates to SVG grid units for custom polygon vertex dragging
+  const getSvgGridCoords = (clientX: number, clientY: number): { x: number; y: number } | null => {
+    if (!customSvgRef.current || !room) return null;
+    const svg = customSvgRef.current;
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return null;
+    const transformed = pt.matrixTransform(ctm.inverse());
+    return {
+      x: Math.max(0, Math.min(room.gridWidth, Math.round(transformed.x))),
+      y: Math.max(0, Math.min(room.gridHeight, Math.round(transformed.y))),
+    };
+  };
+
+  const handleVertexPointerDown = (idx: number, e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setDraggingPointIdx(idx);
+  };
+
+  // Global pointer listeners while dragging a vertex circle
+  useEffect(() => {
+    if (draggingPointIdx === null || !room) return;
+
+    const handlePointerMove = (e: PointerEvent) => {
+      const coords = getSvgGridCoords(e.clientX, e.clientY);
+      if (!coords) return;
+      setCustomPoints((prev) => {
+        if (!prev[draggingPointIdx] || (prev[draggingPointIdx].x === coords.x && prev[draggingPointIdx].y === coords.y)) {
+          return prev;
+        }
+        const updated = [...prev];
+        updated[draggingPointIdx] = coords;
+        return updated;
+      });
+    };
+
+    const handlePointerUp = () => {
+      setDraggingPointIdx(null);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+  }, [draggingPointIdx, room]);
 
   if (!isRoomShapeModalOpen || !room) return null;
 
@@ -614,10 +670,11 @@ export const RoomShapeModal: React.FC = () => {
                 </button>
               </div>
 
-              {/* Interactive Mini Polygon Preview */}
-              <div className="w-full h-44 bg-slate-900 rounded-2xl border border-slate-800 relative flex items-center justify-center overflow-hidden p-2">
+              {/* Interactive Mini Polygon Preview with Draggable Vertices */}
+              <div className="w-full h-48 bg-slate-900 rounded-2xl border border-slate-800 relative flex flex-col items-center justify-center overflow-hidden p-2">
                 <svg
-                  className="w-full h-full"
+                  ref={customSvgRef}
+                  className="w-full h-full select-none touch-none"
                   viewBox={`-2 -2 ${room.gridWidth + 4} ${room.gridHeight + 4}`}
                   preserveAspectRatio="xMidYMid meet"
                 >
@@ -632,6 +689,31 @@ export const RoomShapeModal: React.FC = () => {
                     strokeWidth="0.5"
                     strokeDasharray="1 1"
                   />
+                  {/* Subtle 5m Grid Guidelines */}
+                  {Array.from({ length: Math.floor(room.gridWidth / 5) }).map((_, i) => (
+                    <line
+                      key={`grid-x-${i}`}
+                      x1={(i + 1) * 5}
+                      y1="0"
+                      x2={(i + 1) * 5}
+                      y2={room.gridHeight}
+                      stroke="#1e293b"
+                      strokeWidth="0.3"
+                      strokeDasharray="0.6 0.6"
+                    />
+                  ))}
+                  {Array.from({ length: Math.floor(room.gridHeight / 5) }).map((_, i) => (
+                    <line
+                      key={`grid-y-${i}`}
+                      x1="0"
+                      y1={(i + 1) * 5}
+                      x2={room.gridWidth}
+                      y2={(i + 1) * 5}
+                      stroke="#1e293b"
+                      strokeWidth="0.3"
+                      strokeDasharray="0.6 0.6"
+                    />
+                  ))}
                   {/* Active Custom Polygon */}
                   {customPoints.length >= 3 && (
                     <polygon
@@ -642,43 +724,119 @@ export const RoomShapeModal: React.FC = () => {
                       strokeWidth="1"
                     />
                   )}
-                  {/* Corner Vertex Dots */}
-                  {customPoints.map((p, idx) => (
-                    <g key={idx}>
-                      <circle
-                        cx={p.x}
-                        cy={p.y}
-                        r="0.9"
-                        fill="#ffffff"
-                        stroke="#2563eb"
-                        strokeWidth="0.4"
-                      />
-                      <text
-                        x={p.x + 1}
-                        y={p.y - 0.8}
-                        fill="#93c5fd"
-                        fontSize="1.6"
-                        fontWeight="bold"
+                  {/* Corner Vertex Handles (Interactive Draggable Circles) */}
+                  {customPoints.map((p, idx) => {
+                    const isDragging = draggingPointIdx === idx;
+                    const hitRadius = Math.max(2.8, Math.min(room.gridWidth, room.gridHeight) * 0.09);
+                    return (
+                      <g
+                        key={idx}
+                        data-vertex-index={idx}
+                        onPointerDown={(e) => handleVertexPointerDown(idx, e)}
+                        className="cursor-grab active:cursor-grabbing"
                       >
-                        {idx + 1}
-                      </text>
-                    </g>
-                  ))}
+                        {/* Invisible Larger Hit Target for Touch / Mouse Dragging */}
+                        <circle
+                          cx={p.x}
+                          cy={p.y}
+                          r={hitRadius}
+                          fill="transparent"
+                        />
+                        {/* Glow halo when dragging */}
+                        {isDragging && (
+                          <circle
+                            cx={p.x}
+                            cy={p.y}
+                            r="2.2"
+                            fill="#f59e0b"
+                            fillOpacity="0.35"
+                            className="animate-pulse"
+                          />
+                        )}
+                        {/* Visible Vertex Dot */}
+                        <circle
+                          cx={p.x}
+                          cy={p.y}
+                          r={isDragging ? '1.4' : '1.0'}
+                          fill={isDragging ? '#f59e0b' : '#ffffff'}
+                          stroke={isDragging ? '#fbbf24' : '#2563eb'}
+                          strokeWidth={isDragging ? '0.6' : '0.4'}
+                        />
+                        {/* Corner Number */}
+                        <text
+                          x={p.x + 1.2}
+                          y={p.y - 1.0}
+                          fill={isDragging ? '#fde047' : '#93c5fd'}
+                          fontSize="1.7"
+                          fontWeight="bold"
+                          pointerEvents="none"
+                        >
+                          {idx + 1}
+                        </text>
+                        {/* Live Coordinate HUD Tooltip when Dragging */}
+                        {isDragging && (
+                          <g pointerEvents="none">
+                            <rect
+                              x={p.x - 4}
+                              y={p.y - 3.4}
+                              width="8"
+                              height="2.2"
+                              rx="0.5"
+                              fill="#0f172a"
+                              stroke="#f59e0b"
+                              strokeWidth="0.25"
+                            />
+                            <text
+                              x={p.x}
+                              y={p.y - 2.0}
+                              fill="#fde047"
+                              fontSize="1.2"
+                              fontWeight="black"
+                              textAnchor="middle"
+                            >
+                              X:{p.x}m Y:{p.y}m
+                            </text>
+                          </g>
+                        )}
+                      </g>
+                    );
+                  })}
                 </svg>
+                {/* Visual Drag Hint Bar */}
+                <div className="absolute bottom-1.5 left-2.5 right-2.5 flex items-center justify-between pointer-events-none text-[10px] text-slate-400 font-medium">
+                  <span className="flex items-center gap-1 text-blue-300">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                    <span>Drag circles to shape room</span>
+                  </span>
+                  <span className="font-mono text-slate-500">1m grid snap</span>
+                </div>
               </div>
 
               {/* Corner Points Table / Inputs */}
               <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
-                {customPoints.map((p, idx) => (
+                {customPoints.map((p, idx) => {
+                  const isCurrent = draggingPointIdx === idx;
+                  return (
                   <div
                     key={idx}
-                    className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3 text-xs"
+                    className={`p-2.5 rounded-xl border flex items-center justify-between gap-3 text-xs transition-all ${
+                      isCurrent
+                        ? 'bg-blue-50/80 border-blue-400 shadow-sm ring-1 ring-blue-300'
+                        : 'bg-slate-50 border-slate-200'
+                    }`}
                   >
                     <div className="flex items-center gap-2 font-bold text-slate-700">
-                      <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px]">
+                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${
+                        isCurrent ? 'bg-blue-600 text-white font-extrabold' : 'bg-blue-100 text-blue-700'
+                      }`}>
                         {idx + 1}
                       </span>
                       <span>Corner #{idx + 1}</span>
+                      {isCurrent && (
+                        <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-md animate-pulse">
+                          Dragging
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-2 font-mono font-bold">
@@ -713,7 +871,8 @@ export const RoomShapeModal: React.FC = () => {
                       </button>
                     </div>
                   </div>
-                ))}
+                );
+              })}
               </div>
 
             </div>

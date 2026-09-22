@@ -86,6 +86,7 @@ export const FloorCanvas: React.FC = () => {
     origOffset: 0,
   });
   const [doorLiveOffset, setDoorLiveOffset] = useState<number | null>(null);
+  const hasDoorDragged = useRef(false);
 
   const room = useLiveQuery(async () => {
     if (!selectedRoomId) return undefined;
@@ -254,6 +255,11 @@ export const FloorCanvas: React.FC = () => {
     if (draggingDoorId && appMode === 'edit' && room) {
       const curDoor = roomDoors.find((d) => d.id === draggingDoorId);
       if (curDoor) {
+        const dist = Math.hypot(clientX - doorDragStart.mouseX, clientY - doorDragStart.mouseY);
+        if (dist > 3) {
+          hasDoorDragged.current = true;
+        }
+
         const segments = getRoomWallSegments(room);
         let seg = curDoor.segmentIndex !== undefined ? segments[curDoor.segmentIndex] : undefined;
         if (!seg) {
@@ -344,6 +350,7 @@ export const FloorCanvas: React.FC = () => {
     const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
     const curDoor = roomDoors.find((d) => d.id === doorId);
     if (!curDoor) return;
+    hasDoorDragged.current = false;
     setDraggingDoorId(doorId);
     setDoorDragStart({
       mouseX: clientX,
@@ -366,6 +373,9 @@ export const FloorCanvas: React.FC = () => {
       });
       setDraggingDoorId(null);
       setDoorLiveOffset(null);
+      setTimeout(() => {
+        hasDoorDragged.current = false;
+      }, 150);
     }
 
     // If dragging furniture, commit the new position to DB
@@ -905,10 +915,12 @@ export const FloorCanvas: React.FC = () => {
 
                   {/* Door Drag Handle / Open Modal Tab */}
                   <div
+                    data-door-handle={door.id || 'door-handle'}
                     onMouseDown={(e) => handleDoorDragStart(e, door.id || '')}
                     onTouchStart={(e) => handleDoorDragStart(e, door.id || '')}
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (hasDoorDragged.current) return;
                       setRoomShapeModalOpen(true, 'door');
                     }}
                     className="flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-white/20 cursor-grab active:cursor-grabbing transition-colors"
