@@ -74,31 +74,31 @@ export const RoomManagerModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm select-none">
-      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm select-none animate-in fade-in duration-150">
+      <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[85vh]">
         {/* Header */}
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/90">
+        <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
           <div>
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <MapPin className="w-4 h-4 text-blue-400" />
+            <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-blue-600" />
               <span>Rooms & Floor Plans</span>
             </h3>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-slate-500 font-medium">
               Manage rooms, switch active spaces, or customize room dimensions
             </p>
           </div>
           <button
             onClick={() => setRoomManagerOpen(false)}
-            className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
+            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="p-4 overflow-y-auto space-y-4 custom-scrollbar flex-1">
+        <div className="p-4 sm:p-5 overflow-y-auto space-y-4 custom-scrollbar flex-1 text-slate-800">
           {/* Room List */}
           <div className="space-y-2">
-            <label className="block text-xs font-mono font-semibold text-slate-400 uppercase tracking-wider">
+            <label className="block text-xs font-mono font-bold text-slate-400 uppercase tracking-wider">
               Existing Rooms
             </label>
             {rooms.map((room) => {
@@ -107,28 +107,28 @@ export const RoomManagerModal: React.FC = () => {
                 <div
                   key={room.id}
                   onClick={() => setSelectedRoomId(room.id)}
-                  className={`p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-all ${
+                  className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 cursor-pointer transition-all ${
                     isActive
-                      ? 'bg-blue-600/20 border-blue-500 text-white'
-                      : 'bg-slate-800/60 hover:bg-slate-800 border-slate-700/60 text-slate-200'
+                      ? 'bg-blue-50/80 border-2 border-blue-500 text-blue-950 shadow-xs'
+                      : 'bg-slate-50 hover:bg-slate-100/80 border-slate-200 text-slate-700'
                   }`}
                 >
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex items-center gap-3">
                     <div
                       style={{ backgroundColor: room.color }}
-                      className="w-4 h-4 rounded-md shadow-sm"
+                      className="w-5 h-5 rounded-lg shadow-sm border border-black/10 flex-shrink-0"
                     />
                     <div>
-                      <h5 className="font-bold text-xs sm:text-sm">{room.name}</h5>
-                      <p className="text-[11px] text-slate-400 font-mono">
-                        {room.gridWidth}×{room.gridHeight} units
+                      <h5 className="font-bold text-xs sm:text-sm text-slate-900">{room.name}</h5>
+                      <p className="text-[11px] text-slate-500 font-mono">
+                        {room.gridWidth}m × {room.gridHeight}m
                       </p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2">
                     {isActive && (
-                      <span className="text-[10px] font-mono font-bold bg-blue-500 text-white px-2 py-0.5 rounded-full">
+                      <span className="text-[10px] font-mono font-bold bg-blue-600 text-white px-2 py-0.5 rounded-full shadow-xs">
                         Active
                       </span>
                     )}
@@ -137,7 +137,7 @@ export const RoomManagerModal: React.FC = () => {
                         e.stopPropagation();
                         handleDeleteRoom(room.id);
                       }}
-                      className="p-1 text-slate-500 hover:text-rose-400 rounded transition-colors"
+                      className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
                       title="Delete Room"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -149,13 +149,13 @@ export const RoomManagerModal: React.FC = () => {
           </div>
 
           {/* New Room Form */}
-          <div className="pt-3 border-t border-slate-800">
-            <label className="block text-xs font-mono font-semibold text-slate-400 uppercase tracking-wider mb-2">
+          <div className="pt-3 border-t border-slate-200">
+            <label className="block text-xs font-mono font-bold text-slate-400 uppercase tracking-wider mb-2">
               Create New Room
             </label>
-            <form onSubmit={handleCreateRoom} className="space-y-3 bg-slate-800/40 p-3 rounded-xl border border-slate-700/60">
+            <form onSubmit={handleCreateRoom} className="space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-200/80">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
                   Room Name *
                 </label>
                 <input
@@ -164,14 +164,14 @@ export const RoomManagerModal: React.FC = () => {
                   placeholder="e.g. Master Bedroom, Attic, Office"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full bg-slate-800 text-white text-xs px-3 py-2 rounded-lg border border-slate-700 focus:outline-none focus:border-blue-500"
+                  className="w-full bg-white text-slate-900 text-xs px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 shadow-xs font-medium"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Width (grid units)
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Width (meters)
                   </label>
                   <input
                     type="number"
@@ -179,12 +179,12 @@ export const RoomManagerModal: React.FC = () => {
                     max={60}
                     value={gridWidth}
                     onChange={(e) => setGridWidth(parseInt(e.target.value, 10) || 20)}
-                    className="w-full bg-slate-800 text-white text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 font-mono"
+                    className="w-full bg-white text-slate-900 text-xs px-3 py-2 rounded-xl border border-slate-300 font-mono shadow-xs focus:outline-none focus:border-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Height (grid units)
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Height (meters)
                   </label>
                   <input
                     type="number"
@@ -192,14 +192,14 @@ export const RoomManagerModal: React.FC = () => {
                     max={60}
                     value={gridHeight}
                     onChange={(e) => setGridHeight(parseInt(e.target.value, 10) || 16)}
-                    className="w-full bg-slate-800 text-white text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 font-mono"
+                    className="w-full bg-white text-slate-900 text-xs px-3 py-2 rounded-xl border border-slate-300 font-mono shadow-xs focus:outline-none focus:border-blue-500"
                   />
                 </div>
               </div>
 
               <button
                 type="submit"
-                className="w-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-2 rounded-lg shadow transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-98"
               >
                 <Plus className="w-4 h-4 stroke-[2.5]" />
                 <span>Add Room</span>

@@ -188,32 +188,37 @@ export const FurnitureLibrary: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm select-none">
-      <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm select-none animate-in fade-in duration-150">
+      <div className="w-full max-w-2xl bg-white border border-slate-200 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
         {/* Header */}
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/90">
-          <div>
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-blue-400" />
-              <span>Add Furniture or Storage Unit</span>
-            </h3>
-            <p className="text-xs text-slate-400">
-              Pick a pre-configured template or configure custom dimensions for your floor plan
-            </p>
+        <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between bg-white">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100 shadow-xs">
+              <Sparkles className="w-4.5 h-4.5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900">
+                Add Furniture or Storage Unit
+              </h3>
+              <p className="text-xs text-slate-500">
+                Pick a pre-configured template or specify custom dimensions for your floor plan
+              </p>
+            </div>
           </div>
           <button
             onClick={() => setFurnitureLibraryOpen(false)}
-            className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
+            className="p-2 text-slate-400 hover:text-slate-700 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+            title="Close"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="p-4 overflow-y-auto space-y-5 custom-scrollbar flex-1">
+        <div className="p-4 sm:p-5 overflow-y-auto space-y-5 custom-scrollbar flex-1 bg-white">
           {/* Templates Grid */}
           <div>
-            <h4 className="text-xs font-mono font-semibold text-slate-400 uppercase tracking-wider mb-2.5">
+            <h4 className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider mb-2.5">
               Quick Templates
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -221,20 +226,20 @@ export const FurnitureLibrary: React.FC = () => {
                 <div
                   key={tmpl.name}
                   onClick={() => handleAddTemplate(tmpl)}
-                  className="p-3 rounded-xl bg-slate-800/70 hover:bg-slate-800 border border-slate-700/60 hover:border-blue-500/60 cursor-pointer transition-all flex items-start gap-3 shadow-sm group"
+                  className="p-3 rounded-2xl bg-slate-50 hover:bg-blue-50/50 border border-slate-200/80 hover:border-blue-400 cursor-pointer transition-all flex items-start gap-3 shadow-xs group"
                 >
                   <div
                     style={{ backgroundColor: tmpl.color }}
-                    className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold flex-shrink-0 shadow-md group-hover:scale-105 transition-transform"
+                    className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform"
                   >
-                    <Plus className="w-4 h-4" />
+                    <Plus className="w-4 h-4 stroke-[2.5]" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h5 className="text-xs sm:text-sm font-bold text-white truncate group-hover:text-blue-200">
+                    <h5 className="text-xs sm:text-sm font-bold text-slate-800 truncate group-hover:text-blue-600 transition-colors">
                       {tmpl.name}
                     </h5>
-                    <p className="text-[11px] text-slate-400 font-mono">
-                      {tmpl.width}×{tmpl.length} grid units • {tmpl.defaultContainers.length} slots
+                    <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                      {tmpl.width}m × {tmpl.length}m • {tmpl.defaultContainers.length} storage slots
                     </p>
                   </div>
                 </div>
@@ -243,13 +248,13 @@ export const FurnitureLibrary: React.FC = () => {
           </div>
 
           {/* Custom Furniture Creator */}
-          <div className="pt-3 border-t border-slate-800">
-            <h4 className="text-xs font-mono font-semibold text-slate-400 uppercase tracking-wider mb-2.5">
+          <div className="pt-4 border-t border-slate-100">
+            <h4 className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider mb-2.5">
               Custom Size Furniture
             </h4>
-            <form onSubmit={handleAddCustom} className="p-3 bg-slate-800/40 rounded-xl border border-slate-700/60 space-y-3">
+            <form onSubmit={handleAddCustom} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3.5">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
                   Name
                 </label>
                 <input
@@ -258,14 +263,14 @@ export const FurnitureLibrary: React.FC = () => {
                   placeholder="e.g. Custom Pine Credenza, Corner Shelf"
                   value={customName}
                   onChange={(e) => setCustomName(e.target.value)}
-                  className="w-full bg-slate-800 text-white text-xs px-3 py-2 rounded-lg border border-slate-700 focus:outline-none focus:border-blue-500"
+                  className="w-full bg-white text-slate-800 text-xs px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-xs"
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Width (units)
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Width (meters)
                   </label>
                   <input
                     type="number"
@@ -273,12 +278,12 @@ export const FurnitureLibrary: React.FC = () => {
                     max={20}
                     value={customWidth}
                     onChange={(e) => setCustomWidth(parseInt(e.target.value, 10) || 1)}
-                    className="w-full bg-slate-800 text-white text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 font-mono"
+                    className="w-full bg-white text-slate-800 text-xs px-3 py-2.5 rounded-xl border border-slate-200 font-mono shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Length (units)
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Length (meters)
                   </label>
                   <input
                     type="number"
@@ -286,27 +291,28 @@ export const FurnitureLibrary: React.FC = () => {
                     max={20}
                     value={customLength}
                     onChange={(e) => setCustomLength(parseInt(e.target.value, 10) || 1)}
-                    className="w-full bg-slate-800 text-white text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 font-mono"
+                    className="w-full bg-white text-slate-800 text-xs px-3 py-2.5 rounded-xl border border-slate-200 font-mono shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
                     Color
                   </label>
                   <input
                     type="color"
                     value={customColor}
                     onChange={(e) => setCustomColor(e.target.value)}
-                    className="w-full h-8 rounded-lg bg-slate-800 border border-slate-700 cursor-pointer p-0.5"
+                    className="w-full h-9 rounded-xl bg-white border border-slate-200 cursor-pointer p-0.5 shadow-xs"
                   />
                 </div>
               </div>
 
               <button
                 type="submit"
-                className="w-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-2 rounded-lg shadow transition-colors cursor-pointer"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2.5 rounded-xl shadow-md shadow-blue-500/20 transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-1.5"
               >
-                Place Custom Furniture
+                <Plus className="w-4 h-4 stroke-[2.5]" />
+                <span>Place Custom Furniture</span>
               </button>
             </form>
           </div>

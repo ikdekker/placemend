@@ -21,6 +21,7 @@ export interface AppState {
   fitViewTrigger: number;
   gridSnap: boolean;
   showLabels: boolean;
+  showDimensions: boolean;
   isRoomShapeModalOpen: boolean;
   roomShapeModalTab: 'presets' | 'custom' | 'door';
 
@@ -47,6 +48,7 @@ export interface AppState {
   resetView: () => void;
   toggleGridSnap: () => void;
   toggleShowLabels: () => void;
+  toggleShowDimensions: () => void;
 
   // Modal actions
   setSearchOpen: (open: boolean) => void;
@@ -80,6 +82,7 @@ export const useAppStore = create<AppState>((set) => ({
   fitViewTrigger: 0,
   gridSnap: true,
   showLabels: true,
+  showDimensions: true,
   isRoomShapeModalOpen: false,
   roomShapeModalTab: 'presets',
 
@@ -118,6 +121,7 @@ export const useAppStore = create<AppState>((set) => ({
 
   toggleGridSnap: () => set((s) => ({ gridSnap: !s.gridSnap })),
   toggleShowLabels: () => set((s) => ({ showLabels: !s.showLabels })),
+  toggleShowDimensions: () => set((s) => ({ showDimensions: !s.showDimensions })),
 
   setSearchOpen: (open) => set({ isSearchOpen: open }),
   setItemModalOpen: (open, itemId = null) => set({ isItemModalOpen: open, editingItemId: itemId }),

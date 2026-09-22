@@ -16,7 +16,8 @@ import {
   Sparkles,
   DoorOpen,
   FlipHorizontal,
-  FlipVertical
+  FlipVertical,
+  Ruler
 } from 'lucide-react';
 import { rotateRoom90Clockwise, mirrorRoom, getDoorSvgGeometry, nudgeDoor, getRoomDoors, snapFurniturePosition, getRoomWallSegments } from '../utils/roomGeometry';
 
@@ -38,6 +39,8 @@ export const FloorCanvas: React.FC = () => {
     toggleGridSnap,
     showLabels,
     toggleShowLabels,
+    showDimensions,
+    toggleShowDimensions,
   } = useAppStore();
 
   const { isSearching, matchingFurnitureIds, matchCountsByFurniture, matchingRoomIds } = useVisualSearch();
@@ -192,6 +195,14 @@ export const FloorCanvas: React.FC = () => {
   // 1-Finger Navigation & Touch Panning across the room
   const handlePointerDown = (clientX: number, clientY: number, target: EventTarget) => {
     const targetEl = target as HTMLElement;
+
+    // Never trigger canvas drag or deselect when clicking buttons, toolbars, door handles, or inputs
+    if (targetEl && typeof targetEl.closest === 'function') {
+      if (targetEl.closest('button, [data-toolbar], [data-door-handle], input, select, textarea')) {
+        return;
+      }
+    }
+
     const furnEl = targetEl && typeof targetEl.closest === 'function' ? targetEl.closest('[data-furniture-id]') : null;
     const furnId = furnEl ? furnEl.getAttribute('data-furniture-id') : null;
 
@@ -516,20 +527,22 @@ export const FloorCanvas: React.FC = () => {
   };
 
   // Rotate selected furniture 90°
-  const rotateSelectedFurniture = async () => {
+  const rotateSelectedFurniture = async (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     if (!selectedFurnitureId) return;
     const furn = await db.furniture.get(selectedFurnitureId);
     if (furn) {
       const nextRot = ((furn.position.rotation || 0) + 90) % 360;
       await db.furniture.update(selectedFurnitureId, {
-        'position.rotation': nextRot,
+        position: { ...furn.position, rotation: nextRot },
         updatedAt: Date.now(),
       });
     }
   };
 
   // Delete selected furniture
-  const deleteSelectedFurniture = async () => {
+  const deleteSelectedFurniture = async (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     if (!selectedFurnitureId) return;
     if (window.confirm('Delete this furniture piece? Associated containers will also be removed.')) {
       await db.transaction('rw', [db.furniture, db.containers, db.items], async () => {
@@ -582,9 +595,41 @@ export const FloorCanvas: React.FC = () => {
         </div>
       )}
 
+      {/* View Mode Compact Canvas Controls */}
+      {appMode === 'view' && (
+        <div data-toolbar="view-controls" className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20 flex items-center gap-1.5 bg-white/95 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-slate-200 shadow-md text-slate-700">
+          <button
+            onClick={toggleShowDimensions}
+            className={`flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl transition-colors cursor-pointer ${
+              showDimensions ? 'bg-blue-50 text-blue-600 border border-blue-200' : 'hover:bg-slate-100 text-slate-500'
+            }`}
+            title={showDimensions ? 'Dimensions: ON' : 'Dimensions: OFF'}
+          >
+            <Ruler className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Dimensions</span>
+          </button>
+          <button
+            onClick={toggleShowLabels}
+            className={`p-1.5 rounded-xl transition-colors cursor-pointer ${
+              showLabels ? 'bg-blue-50 text-blue-600 border border-blue-200' : 'hover:bg-slate-100 text-slate-400'
+            }`}
+            title={showLabels ? 'Labels: ON' : 'Labels: OFF'}
+          >
+            <Eye className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={fitRoomToViewport}
+            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer"
+            title="Reset Room Framing"
+          >
+            <Maximize2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Clean Edit Toolbar (Only visible when user actively enters Edit Mode) */}
       {appMode === 'edit' && (
-        <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20 flex items-center gap-1.5 bg-white/95 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-slate-200 shadow-md text-slate-700">
+        <div data-toolbar="edit-controls" className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20 flex items-center gap-1.5 bg-white/95 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-slate-200 shadow-md text-slate-700">
           <button
             onClick={() => setRoomShapeModalOpen(true, 'presets')}
             className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer"
@@ -660,6 +705,15 @@ export const FloorCanvas: React.FC = () => {
             <Eye className="w-4 h-4" />
           </button>
           <button
+            onClick={toggleShowDimensions}
+            className={`p-1.5 rounded-xl transition-colors cursor-pointer ${
+              showDimensions ? 'bg-blue-50 text-blue-600 border border-blue-200' : 'hover:bg-slate-100 text-slate-400'
+            }`}
+            title={showDimensions ? 'Dimensions: ON' : 'Dimensions: OFF'}
+          >
+            <Ruler className="w-4 h-4" />
+          </button>
+          <button
             onClick={fitRoomToViewport}
             className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer"
             title="Reset Room Framing"
@@ -670,30 +724,48 @@ export const FloorCanvas: React.FC = () => {
       )}
 
       {/* Selected Furniture Controls Toolbar (Only in Edit Mode) */}
-      {selectedFurnitureId && appMode === 'edit' && (
-        <div className="absolute bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-white/95 backdrop-blur-md px-3.5 py-1.5 rounded-2xl border border-slate-200 shadow-xl text-slate-800">
-          <span className="text-xs font-bold text-slate-800 truncate max-w-[120px]">
-            {furnitureList.find((f) => f.id === selectedFurnitureId)?.name || 'Selected'}
-          </span>
-          <div className="w-px h-4 bg-slate-200" />
-          <button
-            onClick={rotateSelectedFurniture}
-            className="flex items-center gap-1 text-xs px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold cursor-pointer transition-colors"
-            title="Rotate 90°"
+      {selectedFurnitureId && appMode === 'edit' && (() => {
+        const selectedFurn = furnitureList.find((f) => f.id === selectedFurnitureId);
+        if (!selectedFurn) return null;
+        const furnW = selectedFurn.dimension.width;
+        const furnL = selectedFurn.dimension.length;
+        const furnRot = selectedFurn.position.rotation || 0;
+        return (
+          <div
+            data-toolbar="furniture-controls"
+            onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            className="absolute bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-white/95 backdrop-blur-md px-3.5 py-1.5 rounded-2xl border border-slate-200 shadow-xl text-slate-800 animate-in fade-in slide-in-from-bottom-2 duration-150"
           >
-            <RotateCw className="w-3.5 h-3.5 text-blue-600" />
-            <span>Rotate</span>
-          </button>
-          <button
-            onClick={deleteSelectedFurniture}
-            className="flex items-center gap-1 text-xs px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl font-bold cursor-pointer transition-colors"
-            title="Delete Furniture"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>Delete</span>
-          </button>
-        </div>
-      )}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold text-slate-900 truncate max-w-[120px]">
+                {selectedFurn.name}
+              </span>
+              <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">
+                {furnW}m × {furnL}m
+              </span>
+            </div>
+            <div className="w-px h-4 bg-slate-200" />
+            <button
+              onClick={rotateSelectedFurniture}
+              className="flex items-center gap-1 text-xs px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold cursor-pointer transition-colors active:scale-95"
+              title="Rotate 90° Clockwise"
+            >
+              <RotateCw className="w-3.5 h-3.5 text-blue-600" />
+              <span>Rotate ({furnRot}°)</span>
+            </button>
+            <button
+              onClick={deleteSelectedFurniture}
+              className="flex items-center gap-1 text-xs px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl font-bold cursor-pointer transition-colors active:scale-95"
+              title="Delete Furniture"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete</span>
+            </button>
+          </div>
+        );
+      })()}
 
       {/* Transform Container (Positioned and scaled to frame the room) */}
       <div
@@ -876,7 +948,91 @@ export const FloorCanvas: React.FC = () => {
                 ))}
               </g>
             ))}
+
+            {/* 7. Architectural CAD Dimension Lines & Wall Measurements */}
+            {showDimensions && (
+              <g className="room-dimensions pointer-events-none select-none">
+                {/* Horizontal Top Dimension: Room Width */}
+                <g className="dim-width">
+                  {/* Left Witness Line */}
+                  <line x1={0} y1={-6} x2={0} y2={-32} stroke="#94a3b8" strokeWidth="1" strokeDasharray="2 2" />
+                  {/* Right Witness Line */}
+                  <line x1={roomPixelW} y1={-6} x2={roomPixelW} y2={-32} stroke="#94a3b8" strokeWidth="1" strokeDasharray="2 2" />
+                  {/* Main Dimension Line */}
+                  <line x1={0} y1={-24} x2={roomPixelW} y2={-24} stroke="#475569" strokeWidth="1.5" />
+                  {/* Left End Tick (45 deg architectural slash) */}
+                  <line x1={-4} y1={-20} x2={4} y2={-28} stroke="#0f172a" strokeWidth="2" strokeLinecap="round" />
+                  {/* Right End Tick */}
+                  <line x1={roomPixelW - 4} y1={-20} x2={roomPixelW + 4} y2={-28} stroke="#0f172a" strokeWidth="2" strokeLinecap="round" />
+                  {/* Dimension Text Badge */}
+                  <g transform={`translate(${roomPixelW / 2}, -24)`}>
+                    <rect x={-28} y={-11} width={56} height={22} rx={6} fill="#ffffff" stroke="#cbd5e1" strokeWidth="1.5" />
+                    <text x={0} y={4} textAnchor="middle" fill="#0f172a" fontSize="11" fontFamily="ui-monospace, monospace" fontWeight="bold">
+                      {gridW}m
+                    </text>
+                  </g>
+                </g>
+
+                {/* Vertical Left Dimension: Room Height */}
+                <g className="dim-height">
+                  {/* Top Witness Line */}
+                  <line x1={-6} y1={0} x2={-32} y2={0} stroke="#94a3b8" strokeWidth="1" strokeDasharray="2 2" />
+                  {/* Bottom Witness Line */}
+                  <line x1={-6} y1={roomPixelH} x2={-32} y2={roomPixelH} stroke="#94a3b8" strokeWidth="1" strokeDasharray="2 2" />
+                  {/* Main Dimension Line */}
+                  <line x1={-24} y1={0} x2={-24} y2={roomPixelH} stroke="#475569" strokeWidth="1.5" />
+                  {/* Top End Tick */}
+                  <line x1={-20} y1={-4} x2={-28} y2={4} stroke="#0f172a" strokeWidth="2" strokeLinecap="round" />
+                  {/* Bottom End Tick */}
+                  <line x1={-20} y1={roomPixelH - 4} x2={-28} y2={roomPixelH + 4} stroke="#0f172a" strokeWidth="2" strokeLinecap="round" />
+                  {/* Dimension Text Badge */}
+                  <g transform={`translate(-24, ${roomPixelH / 2})`}>
+                    <rect x={-28} y={-11} width={56} height={22} rx={6} fill="#ffffff" stroke="#cbd5e1" strokeWidth="1.5" />
+                    <text x={0} y={4} textAnchor="middle" fill="#0f172a" fontSize="11" fontFamily="ui-monospace, monospace" fontWeight="bold">
+                      {gridH}m
+                    </text>
+                  </g>
+                </g>
+
+                {/* Wall Segment Measurements for Non-Rectangular / Polygon Rooms */}
+                {room?.polygonPoints && room.polygonPoints.length > 0 && (() => {
+                  const segments = getRoomWallSegments(room);
+                  return segments.map((seg, idx) => {
+                    const midX = ((seg.p1.x + seg.p2.x) / 2) * unitSize;
+                    const midY = ((seg.p1.y + seg.p2.y) / 2) * unitSize;
+                    const dx = seg.p2.x - seg.p1.x;
+                    const dy = seg.p2.y - seg.p1.y;
+                    const len = Math.hypot(dx, dy);
+                    if (len === 0) return null;
+                    // Normal vector pointing outward
+                    const nx = -dy / len;
+                    const ny = dx / len;
+                    const badgeX = midX + nx * 18;
+                    const badgeY = midY + ny * 18;
+
+                    return (
+                      <g key={`seg-dim-${idx}`} transform={`translate(${badgeX}, ${badgeY})`}>
+                        <rect x={-18} y={-8} width={36} height={16} rx={4} fill="#ffffff" stroke="#cbd5e1" strokeWidth="1" />
+                        <text x={0} y={3.5} textAnchor="middle" fill="#1e293b" fontSize="9" fontFamily="ui-monospace, monospace" fontWeight="bold">
+                          {seg.length}m
+                        </text>
+                      </g>
+                    );
+                  });
+                })()}
+              </g>
+            )}
           </svg>
+
+          {/* Room Dimensions & Area Watermark Badge */}
+          {showDimensions && (
+            <div className="absolute top-2.5 left-2.5 pointer-events-none z-10 flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white/90 backdrop-blur-xs border border-slate-200/80 shadow-xs text-[10px] font-mono font-bold text-slate-700">
+              <span className="text-blue-600 font-extrabold">{room?.name}</span>
+              <span>•</span>
+              <span>{gridW}m × {gridH}m</span>
+              <span className="text-slate-400">({gridW * gridH} m²)</span>
+            </div>
+          )}
 
           {/* Interactive Door Drag & Quick Edit Badges for All Doors (Edit Mode) */}
           {doorsWithGeo.map(({ door, geo }) => {
@@ -998,7 +1154,16 @@ export const FloorCanvas: React.FC = () => {
                   isSelected={isSelected}
                   isHighlighted={isHighlighted || isSearchMatch}
                   showLabels={showLabels}
+                  showDimensions={showDimensions}
+                  dimensionText={`${dimW}m × ${dimL}m`}
                 />
+
+                {/* Live Resizing Dimension Tooltip */}
+                {resizeLiveDim && resizeLiveDim.id === furn.id && (
+                  <div className="absolute -top-7 left-1/2 -translate-x-1/2 z-40 bg-blue-600 text-white font-mono text-[10px] font-black px-2 py-0.5 rounded-md shadow-lg pointer-events-none whitespace-nowrap animate-pulse">
+                    {dimW}m × {dimL}m
+                  </div>
+                )}
 
                 {/* Visual Glowing Pulse Beacon & Floating Match Badge */}
                 {isSearchMatch && (

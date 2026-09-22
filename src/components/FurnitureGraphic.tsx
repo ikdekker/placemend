@@ -12,6 +12,8 @@ interface FurnitureGraphicProps {
   isSelected?: boolean;
   isHighlighted?: boolean;
   showLabels?: boolean;
+  showDimensions?: boolean;
+  dimensionText?: string;
 }
 
 export const FurnitureGraphic: React.FC<FurnitureGraphicProps> = ({
@@ -24,6 +26,8 @@ export const FurnitureGraphic: React.FC<FurnitureGraphicProps> = ({
   isSelected = false,
   isHighlighted = false,
   showLabels = true,
+  showDimensions = false,
+  dimensionText,
 }) => {
   // Determine dominant wood/material tones based on provided color or type defaults
   const baseColor = color || getDefaultColor(type);
@@ -96,19 +100,28 @@ export const FurnitureGraphic: React.FC<FurnitureGraphicProps> = ({
         </div>
       )}
 
-      {/* Elegant, Unobtrusive Furniture Title */}
-      {showLabels && (
-        <div className="absolute inset-x-1.5 bottom-1.5 z-10 pointer-events-none flex justify-center">
-          <div
-            className="px-2 py-0.5 rounded-md text-[10px] sm:text-[11px] font-bold tracking-tight truncate max-w-full shadow-xs"
-            style={{
-              backgroundColor: isDark ? 'rgba(15, 23, 42, 0.75)' : 'rgba(255, 255, 255, 0.85)',
-              color: textColor,
-              backdropFilter: 'blur(4px)',
-            }}
-          >
-            {name}
-          </div>
+      {/* Elegant, Unobtrusive Furniture Title & Dimensions Badge */}
+      {(showLabels || showDimensions) && (
+        <div className="absolute inset-x-1 bottom-1 z-10 pointer-events-none flex flex-col items-center justify-center gap-0.5 max-w-full">
+          {showLabels && (
+            <div
+              className="px-1.5 py-0.5 rounded-md text-[10px] sm:text-[11px] font-bold tracking-tight truncate max-w-[94%] shadow-xs leading-tight"
+              style={{
+                backgroundColor: isDark ? 'rgba(15, 23, 42, 0.82)' : 'rgba(255, 255, 255, 0.88)',
+                color: textColor,
+                backdropFilter: 'blur(4px)',
+              }}
+            >
+              {name}
+            </div>
+          )}
+          {showDimensions && dimensionText && (
+            <div
+              className="px-1.5 py-0.2 rounded bg-slate-900/85 backdrop-blur-xs text-white text-[9px] font-mono font-bold tracking-tight shadow-xs border border-white/10 leading-tight"
+            >
+              {dimensionText}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -15,7 +15,8 @@ import {
   X,
   Zap,
   Sparkles,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Ruler
 } from 'lucide-react';
 
 export const Header: React.FC = () => {
@@ -37,6 +38,8 @@ export const Header: React.FC = () => {
     setApiSyncModalOpen,
     resetView,
     setSelectedFurnitureId,
+    showDimensions,
+    toggleShowDimensions,
   } = useAppStore();
 
   const { isSearching, totalMatches } = useVisualSearch();
@@ -224,6 +227,20 @@ export const Header: React.FC = () => {
             <span>Add</span>
           </button>
         )}
+
+        {/* Dimensions Toggle Button (Desktop) */}
+        <button
+          onClick={() => toggleShowDimensions()}
+          className={`hidden md:flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-xl transition-colors cursor-pointer border ${
+            showDimensions
+              ? 'bg-blue-50 text-blue-600 border-blue-200'
+              : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100 border-transparent hover:border-slate-200'
+          }`}
+          title={showDimensions ? 'Dimensions: ON (Click to hide dimensions)' : 'Dimensions: OFF (Click to show dimensions)'}
+        >
+          <Ruler className="w-3.5 h-3.5 text-blue-600" />
+          <span>Dimensions</span>
+        </button>
 
         {/* Recenter Button (Desktop) */}
         <button
