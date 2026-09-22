@@ -13,7 +13,9 @@ import {
   Edit3, 
   Pentagon,
   X,
-  Zap
+  Zap,
+  Sparkles,
+  SlidersHorizontal
 } from 'lucide-react';
 
 export const Header: React.FC = () => {
@@ -29,8 +31,10 @@ export const Header: React.FC = () => {
     setSearchQuery,
     clearSearch,
     setRoomShapeModalOpen,
+    setRoomManagerOpen,
     setFurnitureLibraryOpen,
     setBackupModalOpen,
+    setApiSyncModalOpen,
     resetView,
     setSelectedFurnitureId,
   } = useAppStore();
@@ -90,6 +94,13 @@ export const Header: React.FC = () => {
               </option>
             ))}
           </select>
+          <button
+            onClick={() => setRoomManagerOpen(true)}
+            className="p-1 text-slate-400 hover:text-blue-600 hover:bg-slate-200/60 rounded-md transition-colors cursor-pointer flex-shrink-0"
+            title="Manage Rooms & Spaces (Add or Remove Rooms)"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+          </button>
         </div>
 
         {/* Room Shape Button (Edit Mode, Desktop) */}
@@ -221,6 +232,16 @@ export const Header: React.FC = () => {
           title="Recenter Floor Plan View"
         >
           <Maximize2 className="w-4 h-4" />
+        </button>
+
+        {/* AI & API Sync Button */}
+        <button
+          onClick={() => setApiSyncModalOpen(true)}
+          className="px-2.5 py-1.5 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 bg-indigo-50/60 rounded-xl transition-colors cursor-pointer border border-indigo-200/80 min-h-[38px] flex items-center justify-center gap-1.5 font-bold text-xs shadow-xs active:scale-95"
+          title="AI Room Indexing & API Sync"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-indigo-600 fill-indigo-200" />
+          <span className="hidden sm:inline">AI Sync</span>
         </button>
 
         {/* Backup Button */}

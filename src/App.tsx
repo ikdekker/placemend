@@ -8,6 +8,7 @@ import { FurnitureLibrary } from './components/FurnitureLibrary';
 import { RoomManagerModal } from './components/RoomManagerModal';
 import { RoomShapeModal } from './components/RoomShapeModal';
 import { BackupModal } from './components/BackupModal';
+import { ApiSyncModal } from './components/ApiSyncModal';
 import { SearchModal } from './components/SearchModal';
 import { FloatingSearchBanner } from './components/FloatingSearchBanner';
 import { MobileNav } from './components/MobileNav';
@@ -51,6 +52,7 @@ export function App() {
       <RoomManagerModal />
       <RoomShapeModal />
       <BackupModal />
+      <ApiSyncModal />
     </div>
   );
 }

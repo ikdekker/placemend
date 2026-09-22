@@ -219,6 +219,7 @@ export const SHAPE_PRESETS: ShapePreset[] = [
 export const RoomShapeModal: React.FC = () => {
   const {
     selectedRoomId,
+    setSelectedRoomId,
     isRoomShapeModalOpen,
     setRoomShapeModalOpen,
     roomShapeModalTab,
@@ -233,10 +234,37 @@ export const RoomShapeModal: React.FC = () => {
     }
   }, [isRoomShapeModalOpen, roomShapeModalTab]);
 
+  const allRooms = useLiveQuery(() => db.rooms.toArray()) || [];
+
   const room = useLiveQuery(async () => {
     if (!selectedRoomId) return undefined;
     return await db.rooms.get(selectedRoomId);
   }, [selectedRoomId]);
+
+  const handleDeleteCurrentRoom = async () => {
+    if (!room) return;
+    if (allRooms.length <= 1) {
+      alert('You must keep at least one room.');
+      return;
+    }
+    if (window.confirm(`Delete "${room.name}" and all furniture & items inside it? This cannot be undone.`)) {
+      await db.transaction('rw', [db.rooms, db.furniture, db.containers, db.items], async () => {
+        const furnitures = await db.furniture.where('roomId').equals(room.id).toArray();
+        const furnIds = furnitures.map((f) => f.id);
+        const containers = await db.containers.where('furnitureId').anyOf(furnIds).toArray();
+        const contIds = containers.map((c) => c.id);
+
+        await db.items.where('containerId').anyOf(contIds).delete();
+        await db.containers.where('furnitureId').anyOf(furnIds).delete();
+        await db.furniture.where('roomId').equals(room.id).delete();
+        await db.rooms.delete(room.id);
+      });
+
+      const remaining = allRooms.filter((r) => r.id !== room.id);
+      setSelectedRoomId(remaining[0]?.id || null);
+      setRoomShapeModalOpen(false);
+    }
+  };
 
   // Local state for custom polygon editing
   const [customPoints, setCustomPoints] = useState<Point2D[]>([]);
@@ -487,12 +515,21 @@ export const RoomShapeModal: React.FC = () => {
               "{room.name}" • {room.gridWidth}m × {room.gridHeight}m
             </p>
           </div>
-          <button
-            onClick={() => setRoomShapeModalOpen(false)}
-            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleDeleteCurrentRoom}
+              className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+              title={`Delete "${room.name}" and all furniture & items`}
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setRoomShapeModalOpen(false)}
+              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Tab Navigation */}
@@ -645,6 +682,21 @@ export const RoomShapeModal: React.FC = () => {
                     </div>
                   );
                 })}
+              </div>
+
+              {/* Danger Zone: Delete Room */}
+              <div className="pt-3 mt-4 border-t border-slate-200 flex items-center justify-between bg-slate-50 p-3 rounded-2xl border border-slate-200/80">
+                <div>
+                  <span className="text-xs font-bold text-slate-800">Delete This Room</span>
+                  <p className="text-[11px] text-slate-500">Permanently removes "{room.name}" and all furniture inside it.</p>
+                </div>
+                <button
+                  onClick={handleDeleteCurrentRoom}
+                  className="px-3 py-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer active:scale-95 shadow-xs"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Room</span>
+                </button>
               </div>
             </div>
           )}

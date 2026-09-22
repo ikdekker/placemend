@@ -6,7 +6,8 @@ import {
   Plus, 
   SlidersHorizontal, 
   Zap,
-  Home
+  Home,
+  Sparkles
 } from 'lucide-react';
 
 export const MobileNav: React.FC = () => {
@@ -15,6 +16,7 @@ export const MobileNav: React.FC = () => {
     setSearchOpen,
     setFurnitureLibraryOpen,
     setRoomManagerOpen,
+    setApiSyncModalOpen,
     selectedFurnitureId,
     setSelectedFurnitureId,
     setSelectedContainerId,
@@ -81,6 +83,17 @@ export const MobileNav: React.FC = () => {
           <SlidersHorizontal className="w-5 h-5" />
         </div>
         <span className="text-[11px] font-black truncate">Rooms</span>
+      </button>
+
+      {/* AI Index */}
+      <button
+        onClick={() => setApiSyncModalOpen(true)}
+        className="flex-1 min-w-0 flex flex-col items-center justify-center gap-1 text-indigo-600 hover:text-indigo-800 transition-colors cursor-pointer py-1 min-h-[52px]"
+      >
+        <div className="p-2 rounded-xl bg-indigo-50 border border-indigo-100">
+          <Sparkles className="w-5 h-5 text-indigo-600 fill-indigo-200" />
+        </div>
+        <span className="text-[11px] font-black truncate">AI Sync</span>
       </button>
     </div>
   );

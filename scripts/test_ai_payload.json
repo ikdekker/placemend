@@ -1,0 +1,89 @@
+{
+  "roomName": "Studio Office",
+  "furniture": [
+    {
+      "name": "Oak Bookshelf",
+      "type": "bookshelf",
+      "dimension": { "width": 4, "length": 2, "height": 180 },
+      "color": "#854d0e",
+      "notes": "Spotted along north wall near entrance",
+      "containers": [
+        {
+          "name": "Top Shelf",
+          "type": "shelf",
+          "items": [
+            {
+              "name": "Encyclopedia Vol 1-5",
+              "quantity": 5,
+              "category": "Books",
+              "tags": ["books", "reference"]
+            },
+            {
+              "name": "Brass Hourglass",
+              "quantity": 1,
+              "category": "Decor",
+              "tags": ["antique", "timepiece"]
+            }
+          ]
+        },
+        {
+          "name": "Bottom Shelf",
+          "type": "shelf",
+          "items": [
+            {
+              "name": "Strategy Board Games",
+              "quantity": 3,
+              "category": "Games",
+              "tags": ["games", "boardgames"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Minimalist Standing Desk",
+      "type": "desk",
+      "dimension": { "width": 5, "length": 3, "height": 110 },
+      "color": "#334155",
+      "notes": "Near large window",
+      "containers": [
+        {
+          "name": "Desk Surface",
+          "type": "top_surface",
+          "items": [
+            {
+              "name": "MacBook Pro 16",
+              "quantity": 1,
+              "category": "Computers",
+              "tags": ["laptop", "apple"]
+            },
+            {
+              "name": "Studio Display 27",
+              "quantity": 1,
+              "category": "Electronics",
+              "tags": ["monitor", "display"]
+            }
+          ]
+        },
+        {
+          "name": "Right Drawer",
+          "type": "drawer",
+          "items": [
+            {
+              "name": "Thunderbolt 4 Cable",
+              "quantity": 2,
+              "category": "Cables",
+              "tags": ["cables", "usb-c"]
+            },
+            {
+              "name": "Anker MagSafe Charger",
+              "quantity": 1,
+              "category": "Electronics",
+              "tags": ["charger", "power"]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -31,6 +31,7 @@ export interface AppState {
   isRoomManagerOpen: boolean;
   isFurnitureLibraryOpen: boolean;
   isBackupModalOpen: boolean;
+  isApiSyncModalOpen: boolean;
 
   // Search
   searchQuery: string;
@@ -55,6 +56,7 @@ export interface AppState {
   setRoomShapeModalTab: (tab: 'presets' | 'custom' | 'door') => void;
   setFurnitureLibraryOpen: (open: boolean) => void;
   setBackupModalOpen: (open: boolean) => void;
+  setApiSyncModalOpen: (open: boolean) => void;
   setSearchQuery: (query: string) => void;
   clearSearch: () => void;
 
@@ -87,6 +89,7 @@ export const useAppStore = create<AppState>((set) => ({
   isRoomManagerOpen: false,
   isFurnitureLibraryOpen: false,
   isBackupModalOpen: false,
+  isApiSyncModalOpen: false,
   searchQuery: '',
 
   setSelectedLocationId: (id) => set({ selectedLocationId: id }),
@@ -127,6 +130,7 @@ export const useAppStore = create<AppState>((set) => ({
   setRoomShapeModalTab: (tab) => set({ roomShapeModalTab: tab }),
   setFurnitureLibraryOpen: (open) => set({ isFurnitureLibraryOpen: open }),
   setBackupModalOpen: (open) => set({ isBackupModalOpen: open }),
+  setApiSyncModalOpen: (open) => set({ isApiSyncModalOpen: open }),
   setSearchQuery: (query) => set({ searchQuery: query }),
   clearSearch: () => set({ searchQuery: '', isSearchOpen: false }),
 
