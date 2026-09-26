@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
-import { Container } from '../types';
+import { Container, ContainerType } from '../types';
 import { useVisualSearch } from '../hooks/useVisualSearch';
 import { 
   ArrowLeft, 
@@ -10,24 +10,16 @@ import {
   Trash2, 
   List, 
   Grid, 
-  Box, 
   Archive, 
-  Layers, 
-  ChevronRight,
   Star, 
   Edit3,
   Camera,
-  Image as ImageIcon,
-  Zap,
   Sliders,
-  ArrowRight,
-  ChevronLeft,
-  ChevronUp,
-  ChevronDown,
-  Check,
   Sparkles,
 } from 'lucide-react';
 import { ScanItemsModal } from './ScanItemsModal';
+import { CompartmentEditSheet } from './CompartmentEditSheet';
+import { scheduleAutoSync } from '../services/apiSync';
 import { effectiveContainerType, isOpenKind } from '../utils/containerKind';
 
 function cleanContainerName(name: string): string {
@@ -48,9 +40,7 @@ export const PhysicalFurnitureView: React.FC = () => {
   const [viewMode, setViewMode] = useState<'model' | 'photo'>('model');
   const [isComposing, setIsComposing] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
-  const [addingToCol, setAddingToCol] = useState<number | null>(null);
-  const [newSlotName, setNewSlotName] = useState('');
-  const [newSlotType, setNewSlotType] = useState<Container['type']>('drawer');
+  const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
   const furniture = useLiveQuery(async () => {
@@ -81,63 +71,6 @@ export const PhysicalFurnitureView: React.FC = () => {
   // Top-level sections (e.g. drawers, boxes, shelves directly belonging to furniture)
   const topLevelContainers = containers.filter((c) => !c.parentContainerId);
 
-  // Determine number of columns (1 to 4)
-  const numColumns = Math.max(1, Math.min(4, furniture.columns || 3));
-
-  // Organize containers into columns
-  const columns: Container[][] = Array.from({ length: numColumns }, () => []);
-  topLevelContainers.forEach((container, idx) => {
-    let colIdx = container.columnIndex;
-    if (colIdx === undefined || colIdx < 0 || colIdx >= numColumns) {
-      colIdx = idx % numColumns;
-    }
-    columns[colIdx].push(container);
-  });
-
-  // Sort each column's stack by orderIndex
-  columns.forEach((col) => col.sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0)));
-
-  // Column count updater
-  const handleSetColumns = async (cols: number) => {
-    if (!furniture) return;
-    await db.furniture.update(furniture.id, { columns: cols });
-    // Rebalance any containers that were in out-of-bounds columns
-    for (const c of topLevelContainers) {
-      if ((c.columnIndex ?? 0) >= cols) {
-        await db.containers.update(c.id, { columnIndex: cols - 1 });
-      }
-    }
-  };
-
-  // Reordering handlers for Compose Mode
-  const handleMoveColumn = async (container: Container, delta: number) => {
-    const currentCol = container.columnIndex ?? 0;
-    const newCol = Math.max(0, Math.min(numColumns - 1, currentCol + delta));
-    if (newCol === currentCol) return;
-
-    const targetColContainers = topLevelContainers.filter(c => (c.columnIndex ?? 0) === newCol);
-    await db.containers.update(container.id, {
-      columnIndex: newCol,
-      orderIndex: targetColContainers.length,
-      updatedAt: Date.now(),
-    });
-  };
-
-  const handleMoveStack = async (container: Container, delta: number) => {
-    const colIdx = container.columnIndex ?? 0;
-    const colContainers = topLevelContainers
-      .filter(c => (c.columnIndex ?? 0) === colIdx)
-      .sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
-
-    const currentIndex = colContainers.findIndex(c => c.id === container.id);
-    const targetIndex = currentIndex + delta;
-    if (targetIndex < 0 || targetIndex >= colContainers.length) return;
-
-    const otherContainer = colContainers[targetIndex];
-    await db.containers.update(container.id, { orderIndex: otherContainer.orderIndex || 0 });
-    await db.containers.update(otherContainer.id, { orderIndex: container.orderIndex || 0 });
-  };
-
   const handleDeleteContainer = async (containerId: string) => {
     await db.containers.delete(containerId);
     // Delete any subcompartments or items stored inside
@@ -147,98 +80,6 @@ export const PhysicalFurnitureView: React.FC = () => {
       await db.items.where('containerId').equals(child.id).delete();
     }
     await db.items.where('containerId').equals(containerId).delete();
-  };
-
-  // Preset compositions
-  const handleApplyPreset = async (preset: '3_side_by_side' | '2_left_2_mid_1_right' | '2x2_grid' | 'dresser_stack') => {
-    if (!furniture) return;
-
-    if (preset === '3_side_by_side') {
-      await db.furniture.update(furniture.id, { columns: 3 });
-      for (let i = 0; i < topLevelContainers.length; i++) {
-        await db.containers.update(topLevelContainers[i].id, {
-          columnIndex: Math.min(2, i),
-          orderIndex: 0,
-        });
-      }
-    } else if (preset === '2_left_2_mid_1_right') {
-      await db.furniture.update(furniture.id, { columns: 3 });
-      const existing = [...topLevelContainers];
-      const distribution = [
-        { col: 0, order: 0 },
-        { col: 0, order: 1 },
-        { col: 1, order: 0 },
-        { col: 1, order: 1 },
-        { col: 2, order: 0 },
-      ];
-
-      for (let i = 0; i < existing.length && i < distribution.length; i++) {
-        await db.containers.update(existing[i].id, {
-          columnIndex: distribution[i].col,
-          orderIndex: distribution[i].order,
-        });
-      }
-
-      if (existing.length < 5) {
-        for (let i = existing.length; i < 5; i++) {
-          await db.containers.add({
-            id: `cont-${Date.now()}-${i}`,
-            furnitureId: furniture.id,
-            name: `Drawer ${i + 1}`,
-            type: 'drawer',
-            columnIndex: distribution[i].col,
-            orderIndex: distribution[i].order,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          });
-        }
-      }
-    } else if (preset === '2x2_grid') {
-      await db.furniture.update(furniture.id, { columns: 2 });
-      const existing = [...topLevelContainers];
-      const distribution = [
-        { col: 0, order: 0 },
-        { col: 0, order: 1 },
-        { col: 1, order: 0 },
-        { col: 1, order: 1 },
-      ];
-      for (let i = 0; i < existing.length && i < distribution.length; i++) {
-        await db.containers.update(existing[i].id, {
-          columnIndex: distribution[i].col,
-          orderIndex: distribution[i].order,
-        });
-      }
-    } else if (preset === 'dresser_stack') {
-      await db.furniture.update(furniture.id, { columns: 1 });
-      for (let i = 0; i < topLevelContainers.length; i++) {
-        await db.containers.update(topLevelContainers[i].id, {
-          columnIndex: 0,
-          orderIndex: i,
-        });
-      }
-    }
-  };
-
-  // Add slot to specific column
-  const handleAddSlotToColumn = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (addingToCol === null) return;
-
-    const colContainers = columns[addingToCol] || [];
-    const newContainer: Container = {
-      id: `cont-${Date.now()}`,
-      furnitureId: furniture.id,
-      name: newSlotName.trim() || `Drawer ${topLevelContainers.length + 1}`,
-      type: newSlotType,
-      columnIndex: addingToCol,
-      orderIndex: colContainers.length,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-
-    await db.containers.add(newContainer);
-    setNewSlotName('');
-    setAddingToCol(null);
   };
 
   // Photo handlers
@@ -285,6 +126,129 @@ export const PhysicalFurnitureView: React.FC = () => {
   const facadeBody = facadeBodyAll;
   const facadeIsOpen = facadeBody.every((c) => isOpenKind(effectiveContainerType(c)));
 
+  // --- Layout editing (in place on the front view) ---
+  const touchLayout = () => scheduleAutoSync();
+
+  // Give every compartment an explicit column/order (older data relies on implicit placement)
+  const normalizeLayout = async () => {
+    await db.furniture.update(furniture.id, { columns: facadeNumColumns });
+    for (let col = 0; col < facadeColumns.length; col++) {
+      for (let i = 0; i < facadeColumns[col].length; i++) {
+        const c = facadeColumns[col][i];
+        if (c.columnIndex !== col || c.orderIndex !== i) {
+          await db.containers.update(c.id, { columnIndex: col, orderIndex: i });
+        }
+      }
+    }
+  };
+
+  // Leaving edit mode: drop empty columns so the front doesn't keep blank gaps
+  const compactLayout = async () => {
+    const nonEmpty = facadeColumns.filter((col) => col.length > 0);
+    await db.furniture.update(furniture.id, { columns: Math.max(1, nonEmpty.length), updatedAt: Date.now() });
+    for (let col = 0; col < nonEmpty.length; col++) {
+      for (let i = 0; i < nonEmpty[col].length; i++) {
+        const c = nonEmpty[col][i];
+        if (c.columnIndex !== col || c.orderIndex !== i) {
+          await db.containers.update(c.id, { columnIndex: col, orderIndex: i, updatedAt: Date.now() });
+        }
+      }
+    }
+    touchLayout();
+  };
+
+  const toggleLayoutEditing = async () => {
+    if (isComposing) {
+      setEditingSlotId(null);
+      await compactLayout();
+      setIsComposing(false);
+    } else {
+      await normalizeLayout();
+      setShowAllItems(false);
+      setIsComposing(true);
+    }
+  };
+
+  const addSlot = async (colIdx: number, type: ContainerType = 'drawer') => {
+    const now = Date.now();
+    const col = facadeColumns[colIdx] || [];
+    const defaultName = { drawer: 'Drawer', cabinet_door: 'Door', shelf: 'Shelf', top_surface: 'Top' }[type as string] || 'Compartment';
+    const id = `cont-${now}`;
+    if (colIdx >= facadeNumColumns) {
+      await db.furniture.update(furniture.id, { columns: colIdx + 1, updatedAt: now });
+    }
+    await db.containers.add({
+      id,
+      furnitureId: furniture.id,
+      name: defaultName,
+      type,
+      columnIndex: colIdx,
+      orderIndex: col.length,
+      createdAt: now,
+      updatedAt: now,
+    });
+    touchLayout();
+    setEditingSlotId(id);
+  };
+
+  const slotPosition = (id: string) => {
+    for (let col = 0; col < facadeColumns.length; col++) {
+      const row = facadeColumns[col].findIndex((c) => c.id === id);
+      if (row >= 0) return { col, row };
+    }
+    return null;
+  };
+
+  const moveSlot = async (container: Container, dx: number, dy: number) => {
+    const pos = slotPosition(container.id);
+    if (!pos) return;
+    const now = Date.now();
+    if (dy !== 0) {
+      const column = facadeColumns[pos.col];
+      const other = column[pos.row + dy];
+      if (!other) return;
+      await db.containers.update(container.id, { orderIndex: pos.row + dy, updatedAt: now });
+      await db.containers.update(other.id, { orderIndex: pos.row, updatedAt: now });
+    } else if (dx !== 0) {
+      const target = pos.col + dx;
+      if (target < 0 || target >= facadeNumColumns) return;
+      await db.containers.update(container.id, { columnIndex: target, orderIndex: facadeColumns[target].length, updatedAt: now });
+      // Close the gap left behind in the source column
+      const rest = facadeColumns[pos.col].filter((c) => c.id !== container.id);
+      for (let i = 0; i < rest.length; i++) {
+        if (rest[i].orderIndex !== i) await db.containers.update(rest[i].id, { orderIndex: i, updatedAt: now });
+      }
+    }
+    touchLayout();
+  };
+
+  const updateSlot = async (id: string, patch: Partial<Container>) => {
+    await db.containers.update(id, { ...patch, updatedAt: Date.now() });
+    touchLayout();
+  };
+
+  const deleteSlot = async (id: string) => {
+    setEditingSlotId(null);
+    await handleDeleteContainer(id);
+    touchLayout();
+  };
+
+  const editingSlot = editingSlotId ? containers.find((c) => c.id === editingSlotId) : undefined;
+  const editingPos = editingSlot ? slotPosition(editingSlot.id) : null;
+
+  const addTile = (colIdx: number, label = 'Add') => (
+    <button
+      key={`add-${colIdx}`}
+      type="button"
+      onClick={() => addSlot(colIdx)}
+      className="w-full min-h-[48px] rounded-2xl border-2 border-dashed border-blue-300 bg-blue-50/60 hover:bg-blue-100 text-blue-700 text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+    >
+      <Plus className="w-4 h-4 stroke-[2.5]" />
+      <span>{label}</span>
+    </button>
+  );
+  const editColumnCount = facadeColumns.length;
+
   const renderSlot = (container: Container, stackSize: number, openFrame: boolean) => {
     const kind = effectiveContainerType(container);
     const totalCount = containerTotal(container);
@@ -292,7 +256,9 @@ export const PhysicalFurnitureView: React.FC = () => {
     const isDimmed = isSearching && !isMatch;
     const matchCount = matchCountsByContainer.get(container.id) || 0;
     const color = furniture.color || '#0f766e';
-    const minHeightClass = stackSize === 1
+    const minHeightClass = kind === 'drawer' && stackSize > 1
+      ? 'min-h-[64px] sm:min-h-[80px]'
+      : stackSize === 1
       ? (openFrame ? 'min-h-[120px] sm:min-h-[150px]' : 'min-h-[180px] sm:min-h-[220px]')
       : stackSize === 2 ? 'min-h-[110px] sm:min-h-[140px]' : 'min-h-[92px] sm:min-h-[112px]';
 
@@ -311,13 +277,15 @@ export const PhysicalFurnitureView: React.FC = () => {
     return (
       <div
         key={container.id}
-        onClick={() => setSelectedContainerId(container.id)}
-        className={`flex-1 relative ${openFrame ? 'rounded-none' : 'rounded-2xl sm:rounded-3xl'} p-3 sm:p-4 ${
+        onClick={() => (isComposing ? setEditingSlotId(container.id) : setSelectedContainerId(container.id))}
+        className={`relative ${openFrame ? 'rounded-none' : 'rounded-2xl sm:rounded-3xl'} ${kind === 'drawer' ? 'p-2 sm:p-3' : 'p-3 sm:p-4'} ${
           openFrame || kind === 'shelf' ? 'pb-5 sm:pb-6' : ''
         } flex flex-col justify-between items-center text-center cursor-pointer transition-all duration-200 group active:scale-98 select-none ${minHeightClass} ${frontClass} ${
           isDimmed ? 'opacity-30 grayscale-[30%]' : 'opacity-100'
-        }`}
+        } ${isComposing ? 'outline-2 outline-dashed outline-blue-400 outline-offset-2' : ''}`}
         title={container.name}
+        // Doors are taller than drawers when they share a column, like on real fronts
+        style={{ flexGrow: kind === 'cabinet_door' ? 2 : kind === 'drawer' ? 1 : 1.5, flexBasis: 0 }}
       >
         {/* Count / match pip */}
         <div className="w-full flex items-center justify-end pointer-events-none">
@@ -329,13 +297,11 @@ export const PhysicalFurnitureView: React.FC = () => {
             <span className="min-w-[28px] h-7 px-2.5 rounded-full bg-slate-900 text-white font-mono text-xs sm:text-sm font-black shadow-md flex items-center justify-center">
               {totalCount}
             </span>
-          ) : (
-            <span className="h-7" />
-          )}
+          ) : null}
         </div>
 
         {/* What it is: handle for fronts, rail for hanging, nothing for open shelves */}
-        <div className="my-auto py-2 flex items-center justify-center pointer-events-none w-full">
+        <div className={`my-auto ${kind === 'drawer' ? 'py-1' : 'py-2'} flex items-center justify-center pointer-events-none w-full`}>
           {kind === 'drawer' ? (
             <div className="w-16 sm:w-24 h-3.5 sm:h-4 rounded-full shadow-md border-2 bg-gradient-to-r from-slate-300 via-white to-slate-300 border-slate-400/60 group-hover:border-blue-400" />
           ) : kind === 'cabinet_door' ? (
@@ -366,6 +332,24 @@ export const PhysicalFurnitureView: React.FC = () => {
   return (
     <div className="flex-1 min-h-0 w-full bg-slate-100 flex flex-col overflow-hidden animate-in fade-in duration-150">
       {isScanning && <ScanItemsModal furnitureId={furniture.id} onClose={() => setIsScanning(false)} />}
+      {isComposing && editingSlot && (
+        <CompartmentEditSheet
+          container={editingSlot}
+          kind={effectiveContainerType(editingSlot)}
+          itemCount={containerTotal(editingSlot)}
+          canMove={{
+            left: !!editingPos && editingPos.col > 0,
+            right: !!editingPos && editingPos.col < facadeNumColumns - 1,
+            up: !!editingPos && editingPos.row > 0,
+            down: !!editingPos && editingPos.row < facadeColumns[editingPos.col].length - 1,
+          }}
+          onRename={(name) => updateSlot(editingSlot.id, { name })}
+          onChangeType={(type) => updateSlot(editingSlot.id, { type })}
+          onMove={(dx, dy) => moveSlot(editingSlot, dx, dy)}
+          onDelete={() => deleteSlot(editingSlot.id)}
+          onClose={() => setEditingSlotId(null)}
+        />
+      )}
       <input
         ref={photoInputRef}
         type="file"
@@ -410,19 +394,16 @@ export const PhysicalFurnitureView: React.FC = () => {
           </button>
 
           <button
-            onClick={() => {
-              setIsComposing(!isComposing);
-              if (showAllItems) setShowAllItems(false);
-            }}
+            onClick={toggleLayoutEditing}
             className={`flex items-center gap-1.5 px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all cursor-pointer shadow-xs min-h-[42px] ${
               isComposing 
                 ? 'bg-blue-600 text-white shadow-blue-500/20 ring-2 ring-blue-400' 
                 : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
             }`}
-            title="Configure drawer layout and composition"
+            title={isComposing ? 'Finish editing the layout' : 'Edit the layout: add, rename, move or remove compartments'}
           >
             <Sliders className="w-4 h-4" />
-            <span className={isComposing ? '' : 'hidden sm:inline'}>{isComposing ? 'Done' : 'Layout'}</span>
+            <span className={isComposing ? '' : 'hidden sm:inline'}>{isComposing ? 'Done' : 'Edit layout'}</span>
           </button>
 
           {furniture.photoDataUrl ? (
@@ -529,231 +510,7 @@ export const PhysicalFurnitureView: React.FC = () => {
               })
             )}
           </div>
-        ) : isComposing ? (
-          /* ============================================================ */
-          /* INTERACTIVE LAYOUT COMPOSER (CUSTOM DRAWERS & COLUMNS SETUP) */
-          /* ============================================================ */
-          <div className="w-full max-w-2xl flex flex-col gap-4 animate-in fade-in duration-200">
-            {/* Composer Toolbar */}
-            <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm flex flex-col gap-3.5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-extrabold text-base text-slate-900">Customize Drawer Setup</h3>
-                  <p className="text-xs sm:text-sm text-slate-500">Configure columns and stack drawers in any layout</p>
-                </div>
-                <button
-                  onClick={() => setIsComposing(false)}
-                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs sm:text-sm shadow-sm cursor-pointer min-h-[38px]"
-                >
-                  Done
-                </button>
-              </div>
-
-              {/* Column Count Buttons */}
-              <div className="flex items-center justify-between pt-2.5 border-t border-slate-100 flex-wrap gap-2">
-                <span className="text-xs sm:text-sm font-bold text-slate-600">Columns:</span>
-                <div className="flex items-center gap-2">
-                  {[1, 2, 3, 4].map((cols) => (
-                    <button
-                      key={cols}
-                      onClick={() => handleSetColumns(cols)}
-                      className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-black transition-all cursor-pointer min-h-[40px] ${
-                        numColumns === cols
-                          ? 'bg-slate-900 text-white shadow-xs'
-                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                      }`}
-                    >
-                      {cols} {cols === 1 ? 'Column' : 'Cols'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Quick Presets */}
-              <div className="flex flex-col gap-2 pt-2.5 border-t border-slate-100">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Quick Presets:</span>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <button
-                    onClick={() => handleApplyPreset('3_side_by_side')}
-                    className="p-2.5 sm:p-3 rounded-xl bg-slate-50 hover:bg-blue-50 hover:text-blue-600 text-slate-700 border border-slate-200 text-xs font-bold text-center cursor-pointer transition-all min-h-[44px] flex items-center justify-center"
-                  >
-                    3 Side-by-Side
-                  </button>
-                  <button
-                    onClick={() => handleApplyPreset('2_left_2_mid_1_right')}
-                    className="p-2.5 sm:p-3 rounded-xl bg-amber-50/80 hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-black text-center cursor-pointer transition-all shadow-xs min-h-[44px] flex items-center justify-center"
-                    title="2 stacked on left, 2 stacked in middle, 1 on right"
-                  >
-                    2 Left, 2 Mid, 1 Right
-                  </button>
-                  <button
-                    onClick={() => handleApplyPreset('2x2_grid')}
-                    className="p-2.5 sm:p-3 rounded-xl bg-slate-50 hover:bg-blue-50 hover:text-blue-600 text-slate-700 border border-slate-200 text-xs font-bold text-center cursor-pointer transition-all min-h-[44px] flex items-center justify-center"
-                  >
-                    2x2 Grid
-                  </button>
-                  <button
-                    onClick={() => handleApplyPreset('dresser_stack')}
-                    className="p-2.5 sm:p-3 rounded-xl bg-slate-50 hover:bg-blue-50 hover:text-blue-600 text-slate-700 border border-slate-200 text-xs font-bold text-center cursor-pointer transition-all min-h-[44px] flex items-center justify-center"
-                  >
-                    Dresser Stack
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Interactive Columns Canvas */}
-            <div className="w-full flex flex-col gap-2">
-              <div 
-                className="grid gap-2.5 sm:gap-3.5 w-full"
-                style={{ gridTemplateColumns: `repeat(${numColumns}, minmax(0, 1fr))` }}
-              >
-                {columns.map((colContainers, colIdx) => (
-                  <div 
-                    key={colIdx} 
-                    className="bg-white/85 backdrop-blur-xs rounded-2xl p-3 sm:p-3.5 border-2 border-slate-300/80 shadow-sm flex flex-col gap-2.5 min-h-[220px]"
-                  >
-                    <div className="flex items-center justify-between pb-1.5 border-b border-slate-200/60">
-                      <span className="text-xs font-black uppercase tracking-wider text-slate-600">
-                        {numColumns === 3 
-                          ? (colIdx === 0 ? 'Left' : colIdx === 1 ? 'Middle' : 'Right')
-                          : `Col ${colIdx + 1}`}
-                      </span>
-                      <span className="text-[11px] font-bold text-slate-400">
-                        {colContainers.length} {colContainers.length === 1 ? 'slot' : 'slots'}
-                      </span>
-                    </div>
-
-                    {/* Containers Stacked in this column */}
-                    <div className="flex flex-col gap-2.5 flex-1">
-                      {colContainers.map((container, itemIdx) => (
-                        <div
-                          key={container.id}
-                          className="p-2.5 sm:p-3 rounded-xl bg-slate-50 border border-slate-200 shadow-xs flex flex-col gap-2 text-xs"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="font-extrabold text-slate-800 truncate text-xs sm:text-sm">
-                              {container.name}
-                            </span>
-                            <button
-                              onClick={() => handleDeleteContainer(container.id)}
-                              className="text-slate-400 hover:text-rose-600 p-1 rounded-lg hover:bg-rose-50 cursor-pointer min-w-[30px] min-h-[30px] flex items-center justify-center"
-                              title="Delete drawer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-
-                          {/* Reordering Controls (Bigger thumb targets) */}
-                          <div className="flex items-center justify-between pt-1.5 border-t border-slate-200/60">
-                            {/* Column Move (Left / Right) */}
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                disabled={colIdx === 0}
-                                onClick={() => handleMoveColumn(container, -1)}
-                                className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center transition-all ${
-                                  colIdx > 0 
-                                    ? 'bg-white border border-slate-300 text-slate-700 hover:bg-blue-50 hover:border-blue-400 active:scale-95 cursor-pointer shadow-xs' 
-                                    : 'opacity-25 cursor-not-allowed bg-slate-100 border border-slate-200'
-                                }`}
-                                title="Move left to previous column"
-                              >
-                                ◀
-                              </button>
-                              <button
-                                disabled={colIdx === numColumns - 1}
-                                onClick={() => handleMoveColumn(container, 1)}
-                                className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center transition-all ${
-                                  colIdx < numColumns - 1 
-                                    ? 'bg-white border border-slate-300 text-slate-700 hover:bg-blue-50 hover:border-blue-400 active:scale-95 cursor-pointer shadow-xs' 
-                                    : 'opacity-25 cursor-not-allowed bg-slate-100 border border-slate-200'
-                                }`}
-                                title="Move right to next column"
-                              >
-                                ▶
-                              </button>
-                            </div>
-
-                            {/* Stack Move (Up / Down) */}
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                disabled={itemIdx === 0}
-                                onClick={() => handleMoveStack(container, -1)}
-                                className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center transition-all ${
-                                  itemIdx > 0 
-                                    ? 'bg-white border border-slate-300 text-slate-700 hover:bg-blue-50 hover:border-blue-400 active:scale-95 cursor-pointer shadow-xs' 
-                                    : 'opacity-25 cursor-not-allowed bg-slate-100 border border-slate-200'
-                                }`}
-                                title="Move up in stack"
-                              >
-                                ▲
-                              </button>
-                              <button
-                                disabled={itemIdx === colContainers.length - 1}
-                                onClick={() => handleMoveStack(container, 1)}
-                                className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center transition-all ${
-                                  itemIdx < colContainers.length - 1 
-                                    ? 'bg-white border border-slate-300 text-slate-700 hover:bg-blue-50 hover:border-blue-400 active:scale-95 cursor-pointer shadow-xs' 
-                                    : 'opacity-25 cursor-not-allowed bg-slate-100 border border-slate-200'
-                                }`}
-                                title="Move down in stack"
-                              >
-                                ▼
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-
-                      {colContainers.length === 0 && (
-                        <div className="flex-1 flex items-center justify-center text-center p-3 text-slate-400 text-xs font-medium border-2 border-dashed border-slate-200 rounded-xl min-h-[90px]">
-                          No drawers
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Column Specific Add Drawer Button */}
-                    {addingToCol === colIdx ? (
-                      <form onSubmit={handleAddSlotToColumn} className="flex flex-col gap-2 p-2.5 bg-blue-50 rounded-xl border border-blue-200">
-                        <input
-                          type="text"
-                          placeholder="Drawer name..."
-                          value={newSlotName}
-                          onChange={(e) => setNewSlotName(e.target.value)}
-                          autoFocus
-                          className="w-full px-2.5 py-1.5 text-xs sm:text-sm rounded-lg border border-blue-300 bg-white font-medium"
-                        />
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="submit"
-                            className="flex-1 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold cursor-pointer min-h-[34px]"
-                          >
-                            Add
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setAddingToCol(null)}
-                            className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold cursor-pointer min-h-[34px]"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      </form>
-                    ) : (
-                      <button
-                        onClick={() => setAddingToCol(colIdx)}
-                        className="w-full py-2.5 rounded-xl border-2 border-dashed border-slate-300 hover:border-blue-400 hover:bg-blue-50/60 text-slate-600 hover:text-blue-600 text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all min-h-[42px]"
-                      >
-                        <Plus className="w-4 h-4 stroke-[2.5]" />
-                        <span>Add</span>
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : viewMode === 'photo' && furniture.photoDataUrl ? (
+        ) : viewMode === 'photo' && furniture.photoDataUrl && !isComposing ? (
           /* Real-World Furniture Photo Mode */
           <div className="w-full max-w-2xl flex flex-col items-center gap-4">
             <div className="relative w-full rounded-3xl overflow-hidden border-4 border-white shadow-2xl bg-black/5">
@@ -787,9 +544,9 @@ export const PhysicalFurnitureView: React.FC = () => {
               </span>
               <div 
                 className="grid gap-2.5 sm:gap-3 w-full"
-                style={{ gridTemplateColumns: `repeat(${numColumns}, minmax(0, 1fr))` }}
+                style={{ gridTemplateColumns: `repeat(${facadeColumns.length}, minmax(0, 1fr))` }}
               >
-                {columns.map((colContainers, colIdx) => (
+                {facadeColumns.map((colContainers, colIdx) => (
                   <div key={colIdx} className="flex flex-col gap-2.5">
                     {colContainers.map((container) => {
                       const directCount = itemCountMap.get(container.id) || 0;
@@ -832,6 +589,11 @@ export const PhysicalFurnitureView: React.FC = () => {
           /* PURE VISUAL SEMI-3D FURNITURE FACADE (ZERO TEXT ON DRAWERS)  */
           /* ============================================================ */
           <div className="w-full max-w-2xl flex flex-col items-center gap-4 sm:gap-6 px-1 sm:px-2">
+            {isComposing && (
+              <p className="w-full text-center text-xs sm:text-sm font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-2xl px-3 py-2">
+                Tap a compartment to rename, change or move it. Tap + to add one.
+              </p>
+            )}
             {/* Furniture shell: surfaces on top, then an open frame (tables, racks) or a closed cabinet */}
             <div className="w-full flex flex-col items-center">
               {/* Top surfaces (tabletop, countertop) are drawn as the slab itself; otherwise a plain crown */}
@@ -844,7 +606,7 @@ export const PhysicalFurnitureView: React.FC = () => {
                     return (
                       <button
                         key={container.id}
-                        onClick={() => setSelectedContainerId(container.id)}
+                        onClick={() => (isComposing ? setEditingSlotId(container.id) : setSelectedContainerId(container.id))}
                         style={{ backgroundColor: furniture.color || '#0f766e' }}
                         className={`flex-1 min-w-0 min-h-[52px] rounded-t-2xl px-3 py-2 flex items-center justify-between gap-2 text-white shadow-md border-t border-x border-white/40 cursor-pointer active:scale-[0.99] transition-all ${
                           isMatch ? 'ring-4 ring-amber-400' : 'hover:brightness-110'
@@ -861,6 +623,15 @@ export const PhysicalFurnitureView: React.FC = () => {
                     );
                   })}
                 </div>
+              ) : isComposing ? (
+                <button
+                  type="button"
+                  onClick={() => addSlot(0, 'top_surface')}
+                  className="w-[99%] min-h-[44px] rounded-t-2xl border-2 border-dashed border-blue-300 bg-blue-50/60 hover:bg-blue-100 text-blue-700 text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4 stroke-[2.5]" />
+                  <span>Add top surface</span>
+                </button>
               ) : (
                 <div
                   style={{ backgroundColor: furniture.color || '#0f766e' }}
@@ -868,18 +639,18 @@ export const PhysicalFurnitureView: React.FC = () => {
                 />
               )}
 
-              {topLevelContainers.length === 0 ? (
+              {topLevelContainers.length === 0 && !isComposing ? (
                 <div className="w-full bg-white/85 rounded-b-3xl p-8 text-center flex flex-col items-center gap-3 border-4 border-t-0 border-slate-200">
                   <Archive className="w-10 h-10 text-slate-300" />
                   <p className="text-slate-500 font-medium text-sm">This furniture doesn't have any drawers, shelves or surfaces yet.</p>
                   <button
-                    onClick={() => setIsComposing(true)}
+                    onClick={toggleLayoutEditing}
                     className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold text-xs sm:text-sm shadow-md min-h-[40px]"
                   >
-                    Configure Layout
+                    Edit layout
                   </button>
                 </div>
-              ) : facadeBody.length === 0 ? (
+              ) : facadeBody.length === 0 && !isComposing ? (
                 /* Only a surface (plain table): just legs under the top */
                 <div className="w-[96%] flex justify-between pointer-events-none">
                   <div style={{ backgroundColor: furniture.color || '#0f766e' }} className="w-2.5 sm:w-3 h-20 sm:h-24 rounded-b-md shadow-md" />
@@ -891,13 +662,15 @@ export const PhysicalFurnitureView: React.FC = () => {
                   <div style={{ backgroundColor: furniture.color || '#0f766e' }} className="w-2.5 sm:w-3 rounded-b-md shadow-md flex-shrink-0" />
                   <div
                     className="flex-1 grid gap-x-2 sm:gap-x-4 px-2 sm:px-4"
-                    style={{ gridTemplateColumns: `repeat(${facadeColumns.length}, minmax(0, 1fr))` }}
+                    style={{ gridTemplateColumns: `repeat(${editColumnCount}, minmax(0, 1fr))` }}
                   >
                     {facadeColumns.map((col, colIdx) => (
-                      <div key={colIdx} className="flex flex-col">
+                      <div key={colIdx} className={`flex flex-col ${isComposing ? 'gap-3' : ''}`}>
                         {col.map((container) => renderSlot(container, col.length, true))}
+                        {isComposing && addTile(colIdx)}
                       </div>
                     ))}
+                    
                   </div>
                   <div style={{ backgroundColor: furniture.color || '#0f766e' }} className="w-2.5 sm:w-3 rounded-b-md shadow-md flex-shrink-0" />
                 </div>
@@ -910,13 +683,15 @@ export const PhysicalFurnitureView: React.FC = () => {
                   >
                     <div
                       className="grid gap-2.5 sm:gap-4 w-full"
-                      style={{ gridTemplateColumns: `repeat(${facadeColumns.length}, minmax(0, 1fr))` }}
+                      style={{ gridTemplateColumns: `repeat(${editColumnCount}, minmax(0, 1fr))` }}
                     >
                       {facadeColumns.map((col, colIdx) => (
                         <div key={colIdx} className="flex flex-col gap-2.5 sm:gap-3.5 h-full">
                           {col.map((container) => renderSlot(container, col.length, false))}
+                          {isComposing && addTile(colIdx)}
                         </div>
                       ))}
+                      
                     </div>
                   </div>
                   {/* Feet */}
@@ -925,6 +700,10 @@ export const PhysicalFurnitureView: React.FC = () => {
                     <div style={{ backgroundColor: furniture.color || '#0f766e' }} className="w-5 h-3.5 sm:w-6 sm:h-4 rounded-b-md shadow-md opacity-80" />
                   </div>
                 </>
+              )}
+
+              {isComposing && facadeColumns.length < 4 && (
+                <div className="w-full mt-4">{addTile(facadeColumns.length, 'Add column')}</div>
               )}
 
               {/* Ambient Ground Shadow */}
