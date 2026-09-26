@@ -18,9 +18,12 @@ import {
   Sparkles,
   ArrowRight,
   Maximize2,
+  Minimize2,
   FlipHorizontal,
-  FlipVertical
+  FlipVertical,
+  Edit3
 } from 'lucide-react';
+import { isAutoSyncEnabled, pushLocalToRemote } from '../services/apiSync';
 
 interface ShapePreset {
   id: RoomShapeType;
@@ -216,30 +219,176 @@ export const SHAPE_PRESETS: ShapePreset[] = [
   },
 ];
 
+interface NumberInputProps {
+  value: number;
+  onChange: (val: number) => void;
+  min?: number;
+  max?: number;
+  className?: string;
+  placeholder?: string;
+}
+
+const NumberInput: React.FC<NumberInputProps> = ({
+  value,
+  onChange,
+  min = 0,
+  max = 200,
+  className = '',
+  placeholder = '',
+}) => {
+  const [localStr, setLocalStr] = useState<string>(String(value ?? 0));
+  const [isFocused, setIsFocused] = useState(false);
+
+  useEffect(() => {
+    if (!isFocused) {
+      setLocalStr(String(value ?? 0));
+    }
+  }, [value, isFocused]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    if (raw === '' || /^\d+$/.test(raw)) {
+      setLocalStr(raw);
+      if (raw !== '') {
+        const num = parseInt(raw, 10);
+        if (!isNaN(num)) {
+          onChange(Math.max(min, Math.min(max, num)));
+        }
+      }
+    }
+  };
+
+  const handleBlur = () => {
+    setIsFocused(false);
+    let num = parseInt(localStr, 10);
+    if (isNaN(num) || num < min) {
+      num = min;
+    } else if (num > max) {
+      num = max;
+    }
+    setLocalStr(String(num));
+    onChange(num);
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      pattern="[0-9]*"
+      value={localStr}
+      onChange={handleChange}
+      onFocus={(e) => {
+        setIsFocused(true);
+        e.target.select();
+      }}
+      onBlur={handleBlur}
+      placeholder={placeholder}
+      className={className}
+    />
+  );
+};
+
+const scalePointsProportionally = (
+  points: Point2D[],
+  fromW: number,
+  fromH: number,
+  toW: number,
+  toH: number
+): Point2D[] => {
+  if (points.length < 3 || fromW <= 0 || fromH <= 0 || toW <= 0 || toH <= 0) return points;
+  const ratioX = toW / fromW;
+  const ratioY = toH / fromH;
+  return points.map((p) => ({
+    x: Math.round(p.x * ratioX),
+    y: Math.round(p.y * ratioY),
+  }));
+};
+
+const scalePointsToFitBox = (points: Point2D[], targetW: number, targetH: number): Point2D[] => {
+  if (points.length < 3) return points;
+  const minX = Math.min(...points.map((p) => p.x));
+  const maxX = Math.max(...points.map((p) => p.x));
+  const minY = Math.min(...points.map((p) => p.y));
+  const maxY = Math.max(...points.map((p) => p.y));
+  const spanX = maxX - minX;
+  const spanY = maxY - minY;
+  if (spanX <= 0 || spanY <= 0) return points;
+
+  return points.map((p) => ({
+    x: Math.round(((p.x - minX) / spanX) * targetW),
+    y: Math.round(((p.y - minY) / spanY) * targetH),
+  }));
+};
+
 export const RoomShapeModal: React.FC = () => {
   const {
     selectedRoomId,
     setSelectedRoomId,
     isRoomShapeModalOpen,
     setRoomShapeModalOpen,
+    setRoomManagerOpen,
     roomShapeModalTab,
   } = useAppStore();
 
-  const [activeTab, setActiveTab] = useState<'presets' | 'custom' | 'door'>('presets');
-  const [selectedVariation, setSelectedVariation] = useState<string>('br');
+  const [activeTab, setActiveTab] = useState<'architecture' | 'door'>('architecture');
+  const [selectedPresetId, setSelectedPresetId] = useState<RoomShapeType>('rectangle');
+  const [selectedPresetVariation, setSelectedPresetVariation] = useState<string>('br');
 
   React.useEffect(() => {
     if (isRoomShapeModalOpen && roomShapeModalTab) {
-      setActiveTab(roomShapeModalTab);
+      if (roomShapeModalTab === 'door') {
+        setActiveTab('door');
+      } else {
+        setActiveTab('architecture');
+      }
     }
   }, [isRoomShapeModalOpen, roomShapeModalTab]);
 
   const allRooms = useLiveQuery(() => db.rooms.toArray()) || [];
 
+  // Robust Room Query with auto-fallback to first available room if selectedRoomId is invalid or null
   const room = useLiveQuery(async () => {
-    if (!selectedRoomId) return undefined;
-    return await db.rooms.get(selectedRoomId);
+    if (selectedRoomId) {
+      const r = await db.rooms.get(selectedRoomId);
+      if (r) return r;
+    }
+    const all = await db.rooms.toArray();
+    return all[0] || undefined;
   }, [selectedRoomId]);
+
+  // Keep store synchronized with active room if ID is null or missing from DB
+  useEffect(() => {
+    if (!selectedRoomId && room) {
+      setSelectedRoomId(room.id);
+      return;
+    }
+    if (selectedRoomId) {
+      let isMounted = true;
+      db.rooms.get(selectedRoomId).then((r) => {
+        if (!r && isMounted && room) {
+          setSelectedRoomId(room.id);
+        }
+      });
+      return () => {
+        isMounted = false;
+      };
+    }
+  }, [selectedRoomId, room, setSelectedRoomId]);
+
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [roomNameInput, setRoomNameInput] = useState('');
+
+  const handleSaveRoomName = async () => {
+    if (!room) return;
+    const trimmed = roomNameInput.trim();
+    if (trimmed && trimmed !== room.name) {
+      await db.rooms.update(room.id, {
+        name: trimmed,
+        updatedAt: Date.now(),
+      });
+    }
+    setIsEditingName(false);
+  };
 
   const handleDeleteCurrentRoom = async () => {
     if (!room) return;
@@ -266,11 +415,129 @@ export const RoomShapeModal: React.FC = () => {
     }
   };
 
+  // Fullscreen studio mode toggle (persisted in localStorage, defaults to true per user request)
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('placemend_shape_modal_fullscreen');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleFullscreen = async () => {
+    setIsFullscreen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('placemend_shape_modal_fullscreen', String(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen?.();
+      } else {
+        await document.exitFullscreen?.();
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  // Fullscreen Stage mode toggle (allows the dragging blueprint canvas to take over the entire screen for maximum dragging space)
+  const [isStageFullscreen, setIsStageFullscreen] = useState<boolean>(false);
+  const [showFullscreenHud, setShowFullscreenHud] = useState<boolean>(false);
+
+  const enterStageFullscreen = async () => {
+    setIsStageFullscreen(true);
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen?.();
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const exitStageFullscreen = async () => {
+    setIsStageFullscreen(false);
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen?.();
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  // Synchronize fullscreen state if user presses Escape or exits native browser fullscreen
+  useEffect(() => {
+    const handleFsChange = () => {
+      if (!document.fullscreenElement && isStageFullscreen) {
+        setIsStageFullscreen(false);
+      }
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, [isStageFullscreen]);
+
   // Local state for custom polygon editing
   const [customPoints, setCustomPoints] = useState<Point2D[]>([]);
   const [hasInitializedCustom, setHasInitializedCustom] = useState(false);
   const [draggingPointIdx, setDraggingPointIdx] = useState<number | null>(null);
+  const [selectedCornerIdx, setSelectedCornerIdx] = useState<number | null>(null);
+  const [targetEdgeIdx, setTargetEdgeIdx] = useState<number>(0);
   const customSvgRef = useRef<SVGSVGElement | null>(null);
+
+  // Editable room boundary dimensions (local state, saved on "Save Room Shape")
+  const [boundaryWidth, setBoundaryWidth] = useState<number>(24);
+  const [boundaryHeight, setBoundaryHeight] = useState<number>(18);
+  const [scaleShapeWithBoundary, setScaleShapeWithBoundary] = useState<boolean>(true);
+
+  const handleUpdateBoundaryWidth = (newW: number) => {
+    if (newW <= 0 || newW === boundaryWidth) return;
+    if (scaleShapeWithBoundary && customPoints.length >= 3 && boundaryWidth > 0) {
+      setCustomPoints((prev) => scalePointsProportionally(prev, boundaryWidth, boundaryHeight, newW, boundaryHeight));
+    }
+    setBoundaryWidth(newW);
+  };
+
+  const handleUpdateBoundaryHeight = (newH: number) => {
+    if (newH <= 0 || newH === boundaryHeight) return;
+    if (scaleShapeWithBoundary && customPoints.length >= 3 && boundaryHeight > 0) {
+      setCustomPoints((prev) => scalePointsProportionally(prev, boundaryWidth, boundaryHeight, boundaryWidth, newH));
+    }
+    setBoundaryHeight(newH);
+  };
+
+  const handleAutoFitBoundary = () => {
+    if (customPoints.length >= 3) {
+      const maxX = Math.max(...customPoints.map((p) => p.x));
+      const maxY = Math.max(...customPoints.map((p) => p.y));
+      setBoundaryWidth(Math.max(3, maxX));
+      setBoundaryHeight(Math.max(3, maxY));
+    }
+  };
+
+  const handleFitShapeToBoundary = () => {
+    if (customPoints.length >= 3) {
+      setCustomPoints((prev) => scalePointsToFitBox(prev, boundaryWidth, boundaryHeight));
+    }
+  };
+
+  const handleResetToRectangle = () => {
+    if (!room) return;
+    setCustomPoints([
+      { x: 0, y: 0 },
+      { x: boundaryWidth, y: 0 },
+      { x: boundaryWidth, y: boundaryHeight },
+      { x: 0, y: boundaryHeight },
+    ]);
+    setSelectedCornerIdx(null);
+    setTargetEdgeIdx(0);
+  };
 
   // Local state for multi-door editing
   const [doorsList, setDoorsList] = useState<RoomDoor[]>([]);
@@ -291,6 +558,10 @@ export const RoomShapeModal: React.FC = () => {
       if (!hasInitializedCustom) {
         if (room.polygonPoints && room.polygonPoints.length >= 3) {
           setCustomPoints(room.polygonPoints);
+          const maxX = Math.max(...room.polygonPoints.map((p) => p.x));
+          const maxY = Math.max(...room.polygonPoints.map((p) => p.y));
+          setBoundaryWidth(Math.max(room.gridWidth, maxX));
+          setBoundaryHeight(Math.max(room.gridHeight, maxY));
         } else {
           setCustomPoints([
             { x: 0, y: 0 },
@@ -298,6 +569,8 @@ export const RoomShapeModal: React.FC = () => {
             { x: room.gridWidth, y: room.gridHeight },
             { x: 0, y: room.gridHeight },
           ]);
+          setBoundaryWidth(room.gridWidth);
+          setBoundaryHeight(room.gridHeight);
         }
         setHasInitializedCustom(true);
       }
@@ -323,15 +596,19 @@ export const RoomShapeModal: React.FC = () => {
     const ctm = svg.getScreenCTM();
     if (!ctm) return null;
     const transformed = pt.matrixTransform(ctm.inverse());
+    const limitX = Math.max(boundaryWidth, ...(customPoints.length > 0 ? customPoints.map((p) => p.x) : [boundaryWidth]));
+    const limitY = Math.max(boundaryHeight, ...(customPoints.length > 0 ? customPoints.map((p) => p.y) : [boundaryHeight]));
     return {
-      x: Math.max(0, Math.min(room.gridWidth, Math.round(transformed.x))),
-      y: Math.max(0, Math.min(room.gridHeight, Math.round(transformed.y))),
+      x: Math.max(0, Math.min(limitX, Math.round(transformed.x))),
+      y: Math.max(0, Math.min(limitY, Math.round(transformed.y))),
     };
   };
 
   const handleVertexPointerDown = (idx: number, e: React.PointerEvent) => {
     e.stopPropagation();
     e.preventDefault();
+    setSelectedCornerIdx(idx);
+    setTargetEdgeIdx(idx);
     setDraggingPointIdx(idx);
   };
 
@@ -354,6 +631,17 @@ export const RoomShapeModal: React.FC = () => {
 
     const handlePointerUp = () => {
       setDraggingPointIdx(null);
+      setCustomPoints((current) => {
+        if (current.length >= 3) {
+          const maxX = Math.max(...current.map((p) => p.x));
+          const maxY = Math.max(...current.map((p) => p.y));
+          if (maxX > 0 && maxY > 0) {
+            setBoundaryWidth(Math.max(3, maxX));
+            setBoundaryHeight(Math.max(3, maxY));
+          }
+        }
+        return current;
+      });
     };
 
     window.addEventListener('pointermove', handlePointerMove);
@@ -367,23 +655,106 @@ export const RoomShapeModal: React.FC = () => {
     };
   }, [draggingPointIdx, room]);
 
-  if (!isRoomShapeModalOpen || !room) return null;
-
-  const currentShape = room.shapeType || 'rectangle';
-
-  // Apply a preset shape live
-  const handleApplyShape = async (preset: ShapePreset, variation?: string) => {
-    const points = preset.generatePoints(room.gridWidth, room.gridHeight, variation || selectedVariation);
-    await db.rooms.update(room.id, {
-      shapeType: preset.id,
-      polygonPoints: preset.id === 'rectangle' ? undefined : points,
-      updatedAt: Date.now(),
-    });
-    setCustomPoints(points);
+  const handleDeleteCustomPoint = (index: number) => {
+    if (customPoints.length <= 3) {
+      alert('A room polygon must have at least 3 corner points.');
+      return;
+    }
+    setCustomPoints(customPoints.filter((_, i) => i !== index));
+    if (selectedCornerIdx === index) {
+      setSelectedCornerIdx(null);
+    } else if (selectedCornerIdx !== null && selectedCornerIdx > index) {
+      setSelectedCornerIdx(selectedCornerIdx - 1);
+    }
   };
 
-  // 90° Clockwise Room Rotation
+  // Keyboard shortcuts: Delete/Backspace to remove selected corner, Escape to exit Stage Fullscreen
+  useEffect(() => {
+    if (!isRoomShapeModalOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        return;
+      }
+      if (e.key === 'Escape' && isStageFullscreen) {
+        setIsStageFullscreen(false);
+        return;
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedCornerIdx !== null) {
+        if (customPoints.length > 3) {
+          e.preventDefault();
+          handleDeleteCustomPoint(selectedCornerIdx);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isRoomShapeModalOpen, isStageFullscreen, selectedCornerIdx, customPoints]);
+
+  if (!isRoomShapeModalOpen) return null;
+
+  if (!room) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm select-none animate-in fade-in duration-150">
+        <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl border border-slate-200 text-center">
+          <div className="w-14 h-14 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-center justify-center mx-auto mb-3 text-indigo-600 shadow-sm">
+            <Pentagon className="w-7 h-7" />
+          </div>
+          <h3 className="text-base font-extrabold text-slate-900 mb-1">No Room Selected</h3>
+          <p className="text-xs text-slate-500 mb-4">
+            Please create or select a room before configuring its shape and doors.
+          </p>
+          <div className="flex gap-2 justify-center">
+            <button
+              onClick={() => {
+                setRoomShapeModalOpen(false);
+                setRoomManagerOpen(true);
+              }}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs cursor-pointer transition-all active:scale-95"
+            >
+              Open Room Manager
+            </button>
+            <button
+              onClick={() => setRoomShapeModalOpen(false)}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Explicit Single-Button Override with confirmation dialog to protect custom layouts
+  const handleOverrideWithPreset = () => {
+    if (!room) return;
+    const targetPreset = SHAPE_PRESETS.find((p) => p.id === selectedPresetId) || SHAPE_PRESETS[0];
+    const isCustomized = customPoints.length !== 4 || (room.shapeType && room.shapeType !== 'rectangle');
+
+    if (isCustomized) {
+      const ok = window.confirm(
+        `⚠️ OVERRIDE ROOM ARCHITECTURE?\n\nThis will replace all your current custom wall corners and layout with the "${targetPreset.name}" template.\n\nClick OK to replace the room layout.`
+      );
+      if (!ok) return;
+    }
+
+    const points = targetPreset.generatePoints(boundaryWidth, boundaryHeight, selectedPresetVariation);
+    setCustomPoints(points);
+    setSelectedCornerIdx(null);
+    setTargetEdgeIdx(0);
+  };
+
+  // 90° Clockwise Room Rotation (commits active custom points first so current layout rotates)
   const handleRotateRoom90 = async () => {
+    if (!room) return;
+    if (customPoints.length >= 3) {
+      await db.rooms.update(room.id, {
+        shapeType: 'custom_polygon',
+        polygonPoints: customPoints,
+        updatedAt: Date.now(),
+      });
+    }
     await rotateRoom90Clockwise(room.id);
     const updated = await db.rooms.get(room.id);
     if (updated?.polygonPoints) {
@@ -393,6 +764,14 @@ export const RoomShapeModal: React.FC = () => {
 
   // Mirror Room (Horizontal / Vertical)
   const handleMirrorRoom = async (axis: 'horizontal' | 'vertical') => {
+    if (!room) return;
+    if (customPoints.length >= 3) {
+      await db.rooms.update(room.id, {
+        shapeType: 'custom_polygon',
+        polygonPoints: customPoints,
+        updatedAt: Date.now(),
+      });
+    }
     await mirrorRoom(room.id, axis);
     const updated = await db.rooms.get(room.id);
     if (updated?.polygonPoints) {
@@ -400,21 +779,88 @@ export const RoomShapeModal: React.FC = () => {
     }
   };
 
-  // Custom Shape Point Management
-  const handleAddCustomPoint = () => {
-    if (customPoints.length === 0) return;
-    const last = customPoints[customPoints.length - 1];
-    const first = customPoints[0];
-    const newPt: Point2D = {
-      x: Math.round((last.x + first.x) / 2),
-      y: Math.round((last.y + first.y) / 2),
+  // Project click coordinate onto a wall line segment [p1 -> p2] clamped within boundaries
+  const projectPointOntoSegment = (p: Point2D, a: Point2D, b: Point2D): Point2D => {
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const lenSq = abx * abx + aby * aby;
+    if (lenSq === 0) return { x: a.x, y: a.y };
+    let t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / lenSq;
+    // Keep it slightly inset from vertices so it creates a distinct corner
+    t = Math.max(0.1, Math.min(0.9, t));
+    const projX = Math.round(a.x + t * abx);
+    const projY = Math.round(a.y + t * aby);
+    return {
+      x: Math.max(0, Math.min(boundaryWidth, projX)),
+      y: Math.max(0, Math.min(boundaryHeight, projY)),
     };
-    setCustomPoints([...customPoints, newPt]);
+  };
+
+  // Custom Shape Point Management (Insert on any wall/edge & immediately enable dragging)
+  const handleStartAddPointAtEdge = (edgeIdx: number, e?: React.PointerEvent, clickCoords?: Point2D) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    if (customPoints.length === 0) return;
+    const safeEdge = Math.max(0, Math.min(customPoints.length - 1, edgeIdx));
+    const p1 = customPoints[safeEdge];
+    const p2 = customPoints[(safeEdge + 1) % customPoints.length];
+
+    let newPt: Point2D;
+    if (clickCoords) {
+      newPt = projectPointOntoSegment(clickCoords, p1, p2);
+    } else {
+      newPt = {
+        x: Math.round((p1.x + p2.x) / 2),
+        y: Math.round((p1.y + p2.y) / 2),
+      };
+    }
+
+    // Ensure it doesn't land on exact existing vertex coordinates (e.g. 1m wall segments)
+    if ((newPt.x === p1.x && newPt.y === p1.y) || (newPt.x === p2.x && newPt.y === p2.y)) {
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len;
+      const ny = dx / len;
+      newPt = {
+        x: Math.max(0, Math.min(boundaryWidth, Math.round((p1.x + p2.x) / 2 + nx))),
+        y: Math.max(0, Math.min(boundaryHeight, Math.round((p1.y + p2.y) / 2 + ny))),
+      };
+    }
+
+    const next = [...customPoints];
+    const insertIdx = safeEdge + 1;
+    next.splice(insertIdx, 0, newPt);
+    setCustomPoints(next);
+    setSelectedCornerIdx(insertIdx);
+    setTargetEdgeIdx(insertIdx);
+    // Directly enable drag on the newly created point so moving finger/mouse extrudes it immediately!
+    setDraggingPointIdx(insertIdx);
+  };
+
+  const handleInsertPointAtEdge = (edgeIdx: number, clickCoords?: Point2D) => {
+    handleStartAddPointAtEdge(edgeIdx, undefined, clickCoords);
+  };
+
+  const handleAddCustomPoint = (edgeIdx?: number) => {
+    if (customPoints.length === 0) return;
+    if (edgeIdx !== undefined && !isNaN(edgeIdx)) {
+      handleInsertPointAtEdge(edgeIdx);
+      return;
+    }
+    if (selectedCornerIdx !== null && selectedCornerIdx >= 0 && selectedCornerIdx < customPoints.length) {
+      handleInsertPointAtEdge(selectedCornerIdx);
+      return;
+    }
+    const defaultIdx = targetEdgeIdx < customPoints.length ? targetEdgeIdx : customPoints.length - 1;
+    handleInsertPointAtEdge(defaultIdx);
   };
 
   const handleUpdateCustomPoint = (index: number, field: 'x' | 'y', val: number) => {
     const next = [...customPoints];
-    const maxVal = field === 'x' ? room.gridWidth : room.gridHeight;
+    const maxVal = Math.max(200, field === 'x' ? boundaryWidth : boundaryHeight);
     next[index] = {
       ...next[index],
       [field]: Math.max(0, Math.min(maxVal, val)),
@@ -422,22 +868,21 @@ export const RoomShapeModal: React.FC = () => {
     setCustomPoints(next);
   };
 
-  const handleDeleteCustomPoint = (index: number) => {
-    if (customPoints.length <= 3) {
-      alert('A room polygon must have at least 3 corner points.');
-      return;
-    }
-    setCustomPoints(customPoints.filter((_, i) => i !== index));
-  };
-
   const handleSaveCustomShape = async () => {
     if (customPoints.length < 3) return;
+    const now = Date.now();
     await db.rooms.update(room.id, {
       shapeType: 'custom_polygon',
       polygonPoints: customPoints,
-      updatedAt: Date.now(),
+      gridWidth: boundaryWidth,
+      gridHeight: boundaryHeight,
+      updatedAt: now,
     });
     setRoomShapeModalOpen(false);
+
+    if (isAutoSyncEnabled()) {
+      pushLocalToRemote().catch(console.error);
+    }
   };
 
   // Live auto-save helper for doors
@@ -461,18 +906,26 @@ export const RoomShapeModal: React.FC = () => {
     await persistDoors(updated);
   };
 
-  const handleAddDoor = async () => {
+  const handleAddDoor = async (preferredWall?: WallSide | string, preferredSegment?: number) => {
     const newId = `door-${Date.now()}`;
     const newIndex = doorsList.length + 1;
     const defaultWalls: WallSide[] = ['bottom', 'top', 'left', 'right'];
-    const chosenWall = defaultWalls[(newIndex - 1) % 4];
+    const chosenWall = (preferredWall as WallSide) || defaultWalls[(newIndex - 1) % 4];
+    // Center a standard 1m door on the chosen wall so it always fits, even on short walls
+    const segments = room ? getRoomWallSegments(room) : [];
+    const seg = preferredSegment !== undefined
+      ? segments[preferredSegment]
+      : segments.find((s) => s.id === chosenWall || s.wallSide === chosenWall);
+    const wallLen = seg ? seg.length : (chosenWall === 'top' || chosenWall === 'bottom' ? room?.gridWidth ?? 4 : room?.gridHeight ?? 4);
+    const doorWidth = Math.min(1, wallLen);
     const newDoor: RoomDoor = {
       id: newId,
-      label: `Door ${newIndex}`,
+      label: newIndex === 1 ? 'Main Entrance' : `Door ${newIndex}`,
       wall: chosenWall,
-      offset: 2,
+      segmentIndex: preferredSegment,
+      offset: Math.max(0, Math.floor((wallLen - doorWidth) / 2)),
       swing: 'inward_left',
-      width: 2,
+      width: doorWidth,
     };
     const updated = [...doorsList, newDoor];
     setActiveDoorId(newId);
@@ -501,60 +954,137 @@ export const RoomShapeModal: React.FC = () => {
     : 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm select-none animate-in fade-in duration-150">
-      <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+    <div
+      className={
+        isFullscreen
+          ? 'fixed inset-0 z-50 bg-white flex flex-col p-0 select-none animate-in fade-in duration-150'
+          : 'fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-slate-900/60 backdrop-blur-sm select-none animate-in fade-in duration-150'
+      }
+    >
+      <div
+        className={
+          isFullscreen
+            ? 'w-full h-full bg-white flex flex-col rounded-none border-0 overflow-hidden'
+            : 'w-full max-w-6xl h-[92vh] bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col'
+        }
+      >
         
         {/* Header */}
-        <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
-          <div>
-            <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-              <Pentagon className="w-4 h-4 text-blue-600" />
-              <span>Room Architecture & Shape</span>
-            </h3>
-            <p className="text-xs text-slate-500 font-medium">
-              "{room.name}" • {room.gridWidth}m × {room.gridHeight}m
-            </p>
+        <div className="px-4 sm:px-6 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50/90 flex-shrink-0">
+          <div className="flex-1 min-w-0 pr-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 flex-shrink-0">
+                <Pentagon className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-sm sm:text-base font-extrabold text-slate-900 leading-tight">
+                  Room Architecture & Shape Studio
+                </h3>
+                {isEditingName ? (
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <input
+                      type="text"
+                      autoFocus
+                      value={roomNameInput}
+                      onChange={(e) => setRoomNameInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveRoomName();
+                        if (e.key === 'Escape') setIsEditingName(false);
+                      }}
+                      className="bg-white text-slate-900 text-xs sm:text-sm px-2.5 py-0.5 rounded-lg border border-blue-400 font-bold focus:outline-none focus:ring-2 focus:ring-blue-100 max-w-[220px] shadow-xs"
+                      placeholder="Room name"
+                    />
+                    <button
+                      onClick={handleSaveRoomName}
+                      className="p-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors cursor-pointer flex-shrink-0"
+                      title="Save room name"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setIsEditingName(false)}
+                      className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer flex-shrink-0"
+                      title="Cancel"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <p className="text-xs text-slate-500 font-medium truncate">
+                      "{room.name}" • <span className="font-mono">{activeTab === 'architecture' ? boundaryWidth : room.gridWidth}m × {activeTab === 'architecture' ? boundaryHeight : room.gridHeight}m</span>
+                    </p>
+                    <button
+                      onClick={() => {
+                        setRoomNameInput(room.name);
+                        setIsEditingName(true);
+                      }}
+                      className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer flex-shrink-0"
+                      title={`Rename "${room.name}"`}
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+            {/* Fullscreen Studio Toggle Button */}
+            <button
+              onClick={toggleFullscreen}
+              className="p-1.5 sm:px-3 sm:py-1.5 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 transition-all cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
+              title={isFullscreen ? 'Exit Fullscreen Studio (Windowed)' : 'Maximize to Fullscreen Studio'}
+            >
+              {isFullscreen ? (
+                <>
+                  <Minimize2 className="w-4 h-4 text-slate-700" />
+                  <span className="hidden sm:inline">Exit Fullscreen</span>
+                </>
+              ) : (
+                <>
+                  <Maximize2 className="w-4 h-4 text-slate-700" />
+                  <span className="hidden sm:inline">Fullscreen Studio</span>
+                </>
+              )}
+            </button>
+
+            <div className="h-5 w-px bg-slate-200 mx-0.5" />
+
             <button
               onClick={handleDeleteCurrentRoom}
-              className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+              className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
               title={`Delete "${room.name}" and all furniture & items`}
             >
               <Trash2 className="w-4 h-4" />
             </button>
             <button
               onClick={() => setRoomShapeModalOpen(false)}
-              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors cursor-pointer"
+              className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/70 transition-colors cursor-pointer"
+              title="Close"
             >
-              <X className="w-4 h-4" />
+              <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex border-b border-slate-200 bg-slate-100/70 p-1 gap-1 text-xs font-bold">
+        <div className="flex border-b border-slate-200 bg-slate-100/80 px-4 py-1.5 gap-1.5 text-xs font-bold flex-shrink-0">
           <button
-            onClick={() => setActiveTab('presets')}
-            className={`flex-1 py-2 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-              activeTab === 'presets' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            onClick={() => setActiveTab('architecture')}
+            className={`py-2 px-3 sm:px-4 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer ${
+              activeTab === 'architecture' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <Pentagon className="w-3.5 h-3.5" />
-            <span>Presets & Transforms</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('custom')}
-            className={`flex-1 py-2 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-              activeTab === 'custom' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span>Custom Shape</span>
+            <span>Room Architecture & Shape</span>
+            <span className="ml-0.5 px-1.5 py-0.2 rounded-md bg-blue-100 text-blue-700 text-[10px] font-mono">
+              {customPoints.length} corners
+            </span>
           </button>
           <button
             onClick={() => setActiveTab('door')}
-            className={`flex-1 py-2 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+            className={`py-2 px-3 sm:px-4 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer ${
               activeTab === 'door' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -564,369 +1094,905 @@ export const RoomShapeModal: React.FC = () => {
         </div>
 
         {/* Tab Content */}
-        <div className="p-4 overflow-y-auto space-y-4 flex-1 custom-scrollbar">
-          
-          {/* TAB 1: PRESETS & TRANSFORMS */}
-          {activeTab === 'presets' && (
-            <div className="space-y-4">
-              {/* Room Transforms: Rotate & Mirror */}
-              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 flex flex-col gap-2.5">
-                <div>
-                  <h4 className="text-xs font-black text-blue-950 uppercase tracking-wide">
-                    Room Transforms (Rotate & Mirror)
-                  </h4>
-                  <p className="text-[11px] text-blue-700">
-                    Transform room layout, walls, door, and all interior furniture
-                  </p>
-                </div>
-                <div className="grid grid-cols-3 gap-1.5">
-                  <button
-                    onClick={handleRotateRoom90}
-                    className="flex items-center justify-center gap-1 py-2 px-1.5 rounded-xl bg-white hover:bg-blue-50 text-blue-700 font-bold text-xs shadow-xs border border-blue-200 transition-all active:scale-95 cursor-pointer"
-                    title="Rotate clockwise 90°"
-                  >
-                    <RotateCw className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Rotate 90°</span>
-                  </button>
-                  <button
-                    onClick={() => handleMirrorRoom('horizontal')}
-                    className="flex items-center justify-center gap-1 py-2 px-1.5 rounded-xl bg-white hover:bg-blue-50 text-blue-700 font-bold text-xs shadow-xs border border-blue-200 transition-all active:scale-95 cursor-pointer"
-                    title="Mirror horizontally (Flip Left ↔ Right)"
-                  >
-                    <FlipHorizontal className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Flip Horiz ↔</span>
-                  </button>
-                  <button
-                    onClick={() => handleMirrorRoom('vertical')}
-                    className="flex items-center justify-center gap-1 py-2 px-1.5 rounded-xl bg-white hover:bg-blue-50 text-blue-700 font-bold text-xs shadow-xs border border-blue-200 transition-all active:scale-95 cursor-pointer"
-                    title="Mirror vertically (Flip Top ↕ Bottom)"
-                  >
-                    <FlipVertical className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Flip Vert ↕</span>
-                  </button>
-                </div>
-              </div>
+        {(() => {
+          // Dynamic Bounding Box encompassing (0,0), boundary frame, and ALL custom points
+          const allX = [0, boundaryWidth, ...(customPoints.length > 0 ? customPoints.map((p) => p.x) : [boundaryWidth])];
+          const allY = [0, boundaryHeight, ...(customPoints.length > 0 ? customPoints.map((p) => p.y) : [boundaryHeight])];
+          const minX = Math.min(...allX);
+          const maxX = Math.max(...allX);
+          const minY = Math.min(...allY);
+          const maxY = Math.max(...allY);
 
-              {/* Preset Shapes List */}
-              <div className="space-y-2.5">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Select Architectural Room Layout
-                </span>
+          const spanX = Math.max(1, maxX - minX);
+          const spanY = Math.max(1, maxY - minY);
+          const padX = Math.max(1.8, spanX * 0.12);
+          const padY = Math.max(1.8, spanY * 0.12);
 
-                {SHAPE_PRESETS.map((preset) => {
-                  const isSelected = currentShape === preset.id;
-                  return (
-                    <div
-                      key={preset.id}
-                      className={`p-3.5 rounded-2xl border-2 transition-all flex flex-col gap-2.5 ${
-                        isSelected
-                          ? 'border-blue-600 bg-blue-50/40 shadow-xs'
-                          : 'border-slate-200 hover:border-slate-300 bg-white'
-                      }`}
-                    >
-                      <div 
-                        onClick={() => handleApplyShape(preset)}
-                        className="flex items-center justify-between cursor-pointer"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${
-                            isSelected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
-                          }`}>
-                            {preset.id === 'rectangle' ? (
-                              <Square className="w-5 h-5" />
+          const stageViewBox = `${minX - padX} ${minY - padY} ${spanX + padX * 2} ${spanY + padY * 2}`;
+
+          // Visual scale factor based on effective dimension (normalized to ~24m reference room)
+          const effectiveSpan = Math.max(spanX, spanY);
+          const vScale = Math.max(0.28, Math.min(2.0, effectiveSpan / 24));
+
+          return (
+            <div
+              className={`flex-1 min-h-0 ${
+                activeTab === 'architecture'
+                  ? 'flex flex-col p-3 sm:p-4 overflow-y-auto lg:overflow-hidden custom-scrollbar'
+                  : 'p-4 sm:p-6 overflow-y-auto custom-scrollbar'
+              }`}
+            >
+              {/* UNIFIED ARCHITECTURE STUDIO: 2-COLUMN SPLIT STUDIO LAYOUT */}
+              {activeTab === 'architecture' && (
+                <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-4">
+                  {/* LEFT COLUMN: Expansive Interactive Blueprint Stage (Full-screenable by itself) */}
+                  <div
+                    className={
+                      isStageFullscreen
+                        ? 'fixed inset-0 z-[70] bg-slate-950 flex flex-col select-none overflow-hidden animate-in fade-in duration-150'
+                        : 'flex-1 min-h-[300px] sm:min-h-[360px] lg:min-h-0 flex flex-col bg-slate-950 rounded-2xl border border-slate-800 relative overflow-hidden shadow-inner'
+                    }
+                  >
+                    {/* Blueprint Stage Top Bar with Quick Transforms & Stage Fullscreen */}
+                    <div className="px-4 py-2.5 bg-slate-900/90 border-b border-slate-800/80 flex items-center justify-between z-10 flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-sky-400 animate-pulse" />
+                        <span className="text-xs font-bold text-slate-200">
+                          {isStageFullscreen ? 'Architectural Stage (Fullscreen Drag Studio)' : 'Architectural Stage'}
+                        </span>
+                        <span className="text-[11px] font-mono text-slate-400">
+                          ({boundaryWidth}m × {boundaryHeight}m boundary)
+                        </span>
+                        <span className="hidden sm:inline px-2 py-0.5 rounded-md bg-slate-800 text-sky-300 font-mono text-[10px] border border-slate-700">
+                          1m Grid Snap
+                        </span>
+                        {selectedCornerIdx !== null && customPoints[selectedCornerIdx] && (
+                          <div className="flex items-center gap-1.5 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-lg">
+                            <span className="text-amber-300 font-mono text-[10px] font-bold">
+                              Corner #{selectedCornerIdx + 1}: ({customPoints[selectedCornerIdx].x}m, {customPoints[selectedCornerIdx].y}m)
+                            </span>
+                            {customPoints.length > 3 ? (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteCustomPoint(selectedCornerIdx)}
+                                className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/25 hover:bg-rose-600 text-rose-200 hover:text-white text-[10px] font-bold border border-rose-500/40 transition-all active:scale-95 cursor-pointer ml-0.5"
+                                title="Delete this corner point (or press Backspace/Delete)"
+                              >
+                                <Trash2 className="w-2.5 h-2.5" />
+                                <span>Delete Point</span>
+                              </button>
                             ) : (
-                              <Pentagon className="w-5 h-5" />
+                              <span className="text-[9px] text-slate-500 italic ml-0.5">Min 3 points</span>
                             )}
                           </div>
-                          <div>
-                            <h4 className="text-sm font-black text-slate-900">
-                              {preset.name}
-                            </h4>
-                            <p className="text-xs text-slate-500">
-                              {preset.description}
-                            </p>
-                          </div>
-                        </div>
-
-                        {isSelected && (
-                          <div className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center flex-shrink-0">
-                            <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                          </div>
+                        )}
+                        {(maxX > boundaryWidth || maxY > boundaryHeight) && (
+                          <button
+                            type="button"
+                            onClick={handleAutoFitBoundary}
+                            className="px-2 py-0.5 rounded-md bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-mono text-[10px] border border-amber-500/40 cursor-pointer flex items-center gap-1"
+                            title="Shape corners extend beyond the boundary box. Click to expand boundary to fit shape."
+                          >
+                            <span>Exceeds boundary • Click to Auto-fit</span>
+                          </button>
                         )}
                       </div>
 
-                      {/* Shape Variations (e.g. 4 corner rotations for L and T shapes) */}
-                      {preset.variations && (
-                        <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-slate-200/60">
-                          <span className="text-[10px] uppercase font-bold text-slate-400 mr-1">
-                            Orientation:
-                          </span>
-                          {preset.variations.map((v) => (
+                      {/* Room Transforms: Rotate & Mirror + Stage Fullscreen */}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          onClick={handleRotateRoom90}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-200 hover:text-white font-bold text-[11px] border border-slate-700 shadow-xs transition-all active:scale-95 cursor-pointer"
+                          title="Rotate room and all furniture 90° clockwise"
+                        >
+                          <RotateCw className="w-3 h-3 text-sky-400" />
+                          <span>Rotate 90°</span>
+                        </button>
+                        <button
+                          onClick={() => handleMirrorRoom('horizontal')}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-200 hover:text-white font-bold text-[11px] border border-slate-700 shadow-xs transition-all active:scale-95 cursor-pointer"
+                          title="Mirror horizontally (Flip Left ↔ Right)"
+                        >
+                          <FlipHorizontal className="w-3 h-3 text-sky-400" />
+                          <span>Flip Horiz ↔</span>
+                        </button>
+                        <button
+                          onClick={() => handleMirrorRoom('vertical')}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-200 hover:text-white font-bold text-[11px] border border-slate-700 shadow-xs transition-all active:scale-95 cursor-pointer"
+                          title="Mirror vertically (Flip Top ↕ Bottom)"
+                        >
+                          <FlipVertical className="w-3 h-3 text-sky-400" />
+                          <span>Flip Vert ↕</span>
+                        </button>
+
+                        {/* Fullscreen Stage Mode Toggle Controls */}
+                        {isStageFullscreen ? (
+                          <>
                             <button
-                              key={v.id}
-                              onClick={() => {
-                                setSelectedVariation(v.id);
-                                handleApplyShape(preset, v.id);
-                              }}
-                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                                selectedVariation === v.id
-                                  ? 'bg-blue-600 text-white shadow-xs'
-                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                              type="button"
+                              onClick={() => setShowFullscreenHud((prev) => !prev)}
+                              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] border shadow-xs transition-all active:scale-95 cursor-pointer ${
+                                showFullscreenHud
+                                  ? 'bg-blue-600 border-blue-500 text-white'
+                                  : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
                               }`}
+                              title={showFullscreenHud ? 'Hide floating controls panel' : 'Show floating controls panel'}
                             >
-                              {v.label}
+                              <Sliders className="w-3 h-3" />
+                              <span>{showFullscreenHud ? 'Hide Controls' : 'Show Controls'}</span>
                             </button>
-                          ))}
-                        </div>
-                      )}
+                            <button
+                              type="button"
+                              onClick={handleSaveCustomShape}
+                              className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition-all active:scale-95 cursor-pointer"
+                              title="Save current custom room shape"
+                            >
+                              <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                              <span>Save Shape</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={exitStageFullscreen}
+                              className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 hover:text-amber-200 font-bold text-xs border border-amber-500/40 shadow-md transition-all active:scale-95 cursor-pointer"
+                              title="Exit Stage Fullscreen (or press Escape)"
+                            >
+                              <Minimize2 className="w-3.5 h-3.5 stroke-[2.5]" />
+                              <span>Exit Fullscreen Stage</span>
+                              <kbd className="hidden sm:inline px-1 py-0.2 bg-slate-900 text-slate-400 text-[9px] rounded font-mono border border-slate-700">Esc</kbd>
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={enterStageFullscreen}
+                            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs shadow-md shadow-sky-500/20 transition-all active:scale-95 cursor-pointer ml-0.5"
+                            title="Expand dragging stage to full screen for maximum dragging space"
+                          >
+                            <Maximize2 className="w-3.5 h-3.5 stroke-[2.5]" />
+                            <span>Fullscreen Stage</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  );
-                })}
-              </div>
 
-              {/* Danger Zone: Delete Room */}
-              <div className="pt-3 mt-4 border-t border-slate-200 flex items-center justify-between bg-slate-50 p-3 rounded-2xl border border-slate-200/80">
-                <div>
-                  <span className="text-xs font-bold text-slate-800">Delete This Room</span>
-                  <p className="text-[11px] text-slate-500">Permanently removes "{room.name}" and all furniture inside it.</p>
-                </div>
-                <button
-                  onClick={handleDeleteCurrentRoom}
-                  className="px-3 py-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer active:scale-95 shadow-xs"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Delete Room</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 2: CUSTOM SHAPE BUILDER */}
-          {activeTab === 'custom' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                    Custom Polygon Wall Vertices ({customPoints.length})
-                  </h4>
-                  <p className="text-[11px] text-slate-400">
-                    Define custom room corners in grid units (0 to {room.gridWidth}W, 0 to {room.gridHeight}H)
-                  </p>
-                </div>
-                <button
-                  onClick={handleAddCustomPoint}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-100 font-bold text-xs transition-colors cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Add Corner</span>
-                </button>
-              </div>
-
-              {/* Interactive Mini Polygon Preview with Draggable Vertices */}
-              <div className="w-full h-48 bg-slate-900 rounded-2xl border border-slate-800 relative flex flex-col items-center justify-center overflow-hidden p-2">
-                <svg
-                  ref={customSvgRef}
-                  className="w-full h-full select-none touch-none"
-                  viewBox={`-2 -2 ${room.gridWidth + 4} ${room.gridHeight + 4}`}
-                  preserveAspectRatio="xMidYMid meet"
-                >
-                  {/* Grid Boundary Frame */}
-                  <rect
-                    x="0"
-                    y="0"
-                    width={room.gridWidth}
-                    height={room.gridHeight}
-                    fill="none"
-                    stroke="#334155"
-                    strokeWidth="0.5"
-                    strokeDasharray="1 1"
-                  />
-                  {/* Subtle 5m Grid Guidelines */}
-                  {Array.from({ length: Math.floor(room.gridWidth / 5) }).map((_, i) => (
-                    <line
-                      key={`grid-x-${i}`}
-                      x1={(i + 1) * 5}
-                      y1="0"
-                      x2={(i + 1) * 5}
-                      y2={room.gridHeight}
-                      stroke="#1e293b"
-                      strokeWidth="0.3"
-                      strokeDasharray="0.6 0.6"
-                    />
-                  ))}
-                  {Array.from({ length: Math.floor(room.gridHeight / 5) }).map((_, i) => (
-                    <line
-                      key={`grid-y-${i}`}
-                      x1="0"
-                      y1={(i + 1) * 5}
-                      x2={room.gridWidth}
-                      y2={(i + 1) * 5}
-                      stroke="#1e293b"
-                      strokeWidth="0.3"
-                      strokeDasharray="0.6 0.6"
-                    />
-                  ))}
-                  {/* Active Custom Polygon */}
-                  {customPoints.length >= 3 && (
-                    <polygon
-                      points={customPoints.map((p) => `${p.x},${p.y}`).join(' ')}
-                      fill="#3b82f6"
-                      fillOpacity="0.25"
-                      stroke="#60a5fa"
-                      strokeWidth="1"
-                    />
-                  )}
-                  {/* Corner Vertex Handles (Interactive Draggable Circles) */}
-                  {customPoints.map((p, idx) => {
-                    const isDragging = draggingPointIdx === idx;
-                    const hitRadius = Math.max(2.8, Math.min(room.gridWidth, room.gridHeight) * 0.09);
-                    return (
-                      <g
-                        key={idx}
-                        data-vertex-index={idx}
-                        onPointerDown={(e) => handleVertexPointerDown(idx, e)}
-                        className="cursor-grab active:cursor-grabbing"
+                    {/* Interactive SVG Blueprint Stage */}
+                    <div className="flex-1 w-full min-h-0 relative flex items-center justify-center p-3 select-none touch-none overflow-hidden">
+                      <svg
+                        ref={customSvgRef}
+                        className="w-full h-full select-none touch-none max-h-full"
+                        viewBox={stageViewBox}
+                        preserveAspectRatio="xMidYMid meet"
                       >
-                        {/* Invisible Larger Hit Target for Touch / Mouse Dragging */}
-                        <circle
-                          cx={p.x}
-                          cy={p.y}
-                          r={hitRadius}
-                          fill="transparent"
+                        <defs>
+                          {/* Continuous 1m Architectural Blueprint Grid */}
+                          <pattern
+                            id="stage-blueprint-grid"
+                            width="1"
+                            height="1"
+                            patternUnits="userSpaceOnUse"
+                          >
+                            <circle
+                              cx="0"
+                              cy="0"
+                              r={0.04 * vScale}
+                              fill="#475569"
+                              opacity="0.6"
+                            />
+                          </pattern>
+                          {/* 5m Major Grid Accents */}
+                          <pattern
+                            id="stage-blueprint-major-grid"
+                            width="5"
+                            height="5"
+                            patternUnits="userSpaceOnUse"
+                          >
+                            <circle
+                              cx="0"
+                              cy="0"
+                              r={0.08 * vScale}
+                              fill="#64748b"
+                              opacity="0.85"
+                            />
+                          </pattern>
+                        </defs>
+
+                        {/* Uniform Drafting Canvas Grid (Covers whole visible stage evenly without arbitrary room cutoffs) */}
+                        <rect
+                          x={minX - padX}
+                          y={minY - padY}
+                          width={spanX + padX * 2}
+                          height={spanY + padY * 2}
+                          fill="url(#stage-blueprint-grid)"
+                          pointerEvents="none"
                         />
-                        {/* Glow halo when dragging */}
-                        {isDragging && (
-                          <circle
-                            cx={p.x}
-                            cy={p.y}
-                            r="2.2"
-                            fill="#f59e0b"
-                            fillOpacity="0.35"
-                            className="animate-pulse"
+                        <rect
+                          x={minX - padX}
+                          y={minY - padY}
+                          width={spanX + padX * 2}
+                          height={spanY + padY * 2}
+                          fill="url(#stage-blueprint-major-grid)"
+                          pointerEvents="none"
+                        />
+
+                        {/* Active Custom Polygon Fill */}
+                        {customPoints.length >= 3 && (
+                          <polygon
+                            points={customPoints.map((p) => `${p.x},${p.y}`).join(' ')}
+                            fill="#3b82f6"
+                            fillOpacity="0.22"
+                            stroke="#60a5fa"
+                            strokeWidth={Math.max(0.35, 1.1 * vScale)}
                           />
                         )}
-                        {/* Visible Vertex Dot */}
-                        <circle
-                          cx={p.x}
-                          cy={p.y}
-                          r={isDragging ? '1.4' : '1.0'}
-                          fill={isDragging ? '#f59e0b' : '#ffffff'}
-                          stroke={isDragging ? '#fbbf24' : '#2563eb'}
-                          strokeWidth={isDragging ? '0.6' : '0.4'}
-                        />
-                        {/* Corner Number */}
-                        <text
-                          x={p.x + 1.2}
-                          y={p.y - 1.0}
-                          fill={isDragging ? '#fde047' : '#93c5fd'}
-                          fontSize="1.7"
-                          fontWeight="bold"
-                          pointerEvents="none"
-                        >
-                          {idx + 1}
-                        </text>
-                        {/* Live Coordinate HUD Tooltip when Dragging */}
-                        {isDragging && (
-                          <g pointerEvents="none">
-                            <rect
-                              x={p.x - 4}
-                              y={p.y - 3.4}
-                              width="8"
-                              height="2.2"
-                              rx="0.5"
-                              fill="#0f172a"
-                              stroke="#f59e0b"
-                              strokeWidth="0.25"
-                            />
-                            <text
-                              x={p.x}
-                              y={p.y - 2.0}
-                              fill="#fde047"
-                              fontSize="1.2"
-                              fontWeight="black"
-                              textAnchor="middle"
-                            >
-                              X:{p.x}m Y:{p.y}m
-                            </text>
-                          </g>
-                        )}
-                      </g>
-                    );
-                  })}
-                </svg>
-                {/* Visual Drag Hint Bar */}
-                <div className="absolute bottom-1.5 left-2.5 right-2.5 flex items-center justify-between pointer-events-none text-[10px] text-slate-400 font-medium">
-                  <span className="flex items-center gap-1 text-blue-300">
-                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                    <span>Drag circles to shape room</span>
-                  </span>
-                  <span className="font-mono text-slate-500">1m grid snap</span>
-                </div>
-              </div>
 
-              {/* Corner Points Table / Inputs */}
-              <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
-                {customPoints.map((p, idx) => {
-                  const isCurrent = draggingPointIdx === idx;
-                  return (
-                  <div
-                    key={idx}
-                    className={`p-2.5 rounded-xl border flex items-center justify-between gap-3 text-xs transition-all ${
-                      isCurrent
-                        ? 'bg-blue-50/80 border-blue-400 shadow-sm ring-1 ring-blue-300'
-                        : 'bg-slate-50 border-slate-200'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 font-bold text-slate-700">
-                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${
-                        isCurrent ? 'bg-blue-600 text-white font-extrabold' : 'bg-blue-100 text-blue-700'
-                      }`}>
-                        {idx + 1}
-                      </span>
-                      <span>Corner #{idx + 1}</span>
-                      {isCurrent && (
-                        <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-md animate-pulse">
-                          Dragging
-                        </span>
+                        {/* 1. Wall Lines (Clean Architectural Perimeter, No Accidental Point Spawning) */}
+                        {customPoints.map((p1, idx) => {
+                          const p2 = customPoints[(idx + 1) % customPoints.length];
+                          const isTargetWall = targetEdgeIdx === idx || selectedCornerIdx === idx;
+
+                          return (
+                            <line
+                              key={`wall-line-${idx}`}
+                              x1={p1.x}
+                              y1={p1.y}
+                              x2={p2.x}
+                              y2={p2.y}
+                              stroke={isTargetWall ? '#38bdf8' : '#60a5fa'}
+                              strokeWidth={Math.max(0.6, 1.2 * vScale)}
+                              strokeDasharray={isTargetWall ? '2 2' : undefined}
+                              pointerEvents="none"
+                            />
+                          );
+                        })}
+
+                        {/* 2. Wall Length Dimension Badges (Offset cleanly away from the 50% midpoint '+' handle) */}
+                        {customPoints.map((p1, idx) => {
+                          const p2 = customPoints[(idx + 1) % customPoints.length];
+                          const wallLen = Math.round(Math.hypot(p2.x - p1.x, p2.y - p1.y));
+                          if (wallLen <= 0) return null;
+
+                          // Position at 25% of the wall so it never overlaps the '+' button at 50%
+                          const lx = p1.x * 0.75 + p2.x * 0.25;
+                          const ly = p1.y * 0.75 + p2.y * 0.25;
+                          const dx = p2.x - p1.x;
+                          const dy = p2.y - p1.y;
+                          const len = Math.hypot(dx, dy) || 1;
+                          const nx = -dy / len;
+                          const ny = dx / len;
+                          const labelDist = 1.35 * vScale;
+                          const cx = lx + nx * labelDist;
+                          const cy = ly + ny * labelDist;
+
+                          return (
+                            <g key={`wall-badge-${idx}`} pointerEvents="none" className="select-none">
+                              <rect
+                                x={cx - 1.0 * vScale}
+                                y={cy - 0.55 * vScale}
+                                width={2.0 * vScale}
+                                height={1.1 * vScale}
+                                rx={0.35 * vScale}
+                                fill="#0f172a"
+                                fillOpacity="0.88"
+                                stroke="#334155"
+                                strokeWidth={0.15 * vScale}
+                              />
+                              <text
+                                x={cx}
+                                y={cy + 0.3 * vScale}
+                                fill="#94a3b8"
+                                fontSize={0.75 * vScale}
+                                fontWeight="bold"
+                                textAnchor="middle"
+                                fontFamily="monospace"
+                              >
+                                {wallLen}m
+                              </text>
+                            </g>
+                          );
+                        })}
+
+                        {/* 3. Midpoint '+' Handles (Shown at the 50% midpoint of walls >= 2.5m, compact and clean) */}
+                        {customPoints.map((p1, idx) => {
+                          const p2 = customPoints[(idx + 1) % customPoints.length];
+                          const wallLen = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+                          if (wallLen < 2.5) return null;
+                          const mx = (p1.x + p2.x) / 2;
+                          const my = (p1.y + p2.y) / 2;
+                          const plusRadius = 0.85 * vScale;
+                          const hitRadius = 1.35 * vScale;
+
+                          return (
+                            <g
+                              key={`plus-handle-${idx}`}
+                              data-plus-edge={idx}
+                              className="cursor-pointer group select-none touch-none"
+                              onPointerDown={(e) => handleStartAddPointAtEdge(idx, e)}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <title>Add corner point on Wall #{idx + 1}</title>
+                              <circle
+                                cx={mx}
+                                cy={my}
+                                r={hitRadius}
+                                fill="transparent"
+                              />
+                              <circle
+                                cx={mx}
+                                cy={my}
+                                r={plusRadius}
+                                fill="#0284c7"
+                                stroke="#ffffff"
+                                strokeWidth={0.25 * vScale}
+                                className="group-hover:fill-amber-500 transition-all shadow-md"
+                              />
+                              <text
+                                x={mx}
+                                y={my + 0.32 * vScale}
+                                fill="#ffffff"
+                                fontSize={1.1 * vScale}
+                                fontWeight="900"
+                                textAnchor="middle"
+                                pointerEvents="none"
+                                className="select-none"
+                              >
+                                +
+                              </text>
+                            </g>
+                          );
+                        })}
+
+                        {/* 4. Corner Vertex Handles (Rendered on the ABSOLUTE TOP layer for 100% accurate grab & touch) */}
+                        {customPoints.map((p, idx) => {
+                          const isDragging = draggingPointIdx === idx;
+                          const isSelected = selectedCornerIdx === idx;
+                          const hitRadius = Math.max(1.8, 2.2 * vScale);
+                          const nodeRadius = 1.15 * vScale;
+
+                          return (
+                            <g
+                              key={`vertex-${idx}`}
+                              data-vertex-index={idx}
+                              onPointerDown={(e) => handleVertexPointerDown(idx, e)}
+                              className="cursor-grab active:cursor-grabbing select-none touch-none"
+                            >
+                              {/* Generous Hit Target for effortless corner grabbing */}
+                              <circle
+                                cx={p.x}
+                                cy={p.y}
+                                r={hitRadius}
+                                fill="transparent"
+                              />
+                              {/* Glow Halo when Selected or Dragging */}
+                              {(isDragging || isSelected) && (
+                                <circle
+                                  cx={p.x}
+                                  cy={p.y}
+                                  r={2.4 * vScale}
+                                  fill="#f59e0b"
+                                  fillOpacity="0.4"
+                                  className="animate-pulse"
+                                />
+                              )}
+                              {/* Vertex Node Circle */}
+                              <circle
+                                cx={p.x}
+                                cy={p.y}
+                                r={nodeRadius}
+                                fill={isDragging || isSelected ? '#f59e0b' : '#2563eb'}
+                                stroke="#ffffff"
+                                strokeWidth={0.35 * vScale}
+                                className="shadow-lg transition-transform active:scale-110"
+                              />
+                              {/* Corner Number cleanly centered inside the circle */}
+                              <text
+                                x={p.x}
+                                y={p.y + 0.35 * vScale}
+                                fill="#ffffff"
+                                fontSize={0.95 * vScale}
+                                fontWeight="900"
+                                textAnchor="middle"
+                                pointerEvents="none"
+                              >
+                                {idx + 1}
+                              </text>
+
+                              {/* Coordinate HUD + Direct Red '✕' Delete Point Button */}
+                              {isSelected && !isDragging && (() => {
+                                const isNearTop = p.y < 3;
+                                const tooltipY = isNearTop ? p.y + 1.6 * vScale : p.y - 2.8 * vScale;
+                                const textY = isNearTop ? p.y + 2.7 * vScale : p.y - 1.7 * vScale;
+                                const deleteY = isNearTop ? p.y + 2.4 * vScale : p.y - 2.0 * vScale;
+                                const deleteTextY = isNearTop ? p.y + 2.7 * vScale : p.y - 1.7 * vScale;
+
+                                return (
+                                  <g>
+                                    {/* Coordinate Tooltip */}
+                                    <g pointerEvents="none">
+                                      <rect
+                                        x={p.x - 3.2 * vScale}
+                                        y={tooltipY}
+                                        width={5.2 * vScale}
+                                        height={1.7 * vScale}
+                                        rx={0.4 * vScale}
+                                        fill="#0f172a"
+                                        stroke="#f59e0b"
+                                        strokeWidth={0.2 * vScale}
+                                      />
+                                      <text
+                                        x={p.x - 0.6 * vScale}
+                                        y={textY}
+                                        fill="#fde047"
+                                        fontSize={0.9 * vScale}
+                                        fontWeight="black"
+                                        textAnchor="middle"
+                                      >
+                                        X:{p.x}m Y:{p.y}m
+                                      </text>
+                                    </g>
+
+                                    {/* On-Canvas Delete Point Button ('✕' badge) */}
+                                    {customPoints.length > 3 && (
+                                      <g
+                                        data-delete-corner={idx}
+                                        className="cursor-pointer group"
+                                        onPointerDown={(e) => {
+                                          e.stopPropagation();
+                                          e.preventDefault();
+                                          handleDeleteCustomPoint(idx);
+                                        }}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleDeleteCustomPoint(idx);
+                                        }}
+                                      >
+                                        <title>Delete Corner #{idx + 1}</title>
+                                        {/* Generous Hit Zone */}
+                                        <circle
+                                          cx={p.x + 3.0 * vScale}
+                                          cy={deleteY}
+                                          r={1.5 * vScale}
+                                          fill="transparent"
+                                        />
+                                        {/* Red Circle Button */}
+                                        <circle
+                                          cx={p.x + 3.0 * vScale}
+                                          cy={deleteY}
+                                          r={0.85 * vScale}
+                                          fill="#ef4444"
+                                          stroke="#ffffff"
+                                          strokeWidth={0.25 * vScale}
+                                          className="group-hover:fill-rose-700 transition-colors shadow-lg"
+                                        />
+                                        {/* '✕' icon */}
+                                        <text
+                                          x={p.x + 3.0 * vScale}
+                                          y={deleteTextY}
+                                          fill="#ffffff"
+                                          fontSize={1.0 * vScale}
+                                          fontWeight="900"
+                                          textAnchor="middle"
+                                          pointerEvents="none"
+                                        >
+                                          ×
+                                        </text>
+                                      </g>
+                                    )}
+                                  </g>
+                                );
+                              })()}
+                            </g>
+                          );
+                        })}
+                      </svg>
+
+                      {/* Floating Controls HUD in Fullscreen Stage Mode */}
+                      {isStageFullscreen && showFullscreenHud && (
+                        <div className="absolute top-4 right-4 z-20 w-80 sm:w-88 max-h-[calc(100vh-140px)] overflow-y-auto bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-2xl p-3.5 shadow-2xl flex flex-col gap-3 custom-scrollbar text-white animate-in slide-in-from-top-2 duration-150">
+                          {/* HUD Header */}
+                          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                            <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5 uppercase tracking-wide">
+                              <Sliders className="w-3.5 h-3.5 text-sky-400" />
+                              <span>Stage Controls</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setShowFullscreenHud(false)}
+                              className="p-1 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+                              title="Close controls panel"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          {/* Boundary Size */}
+                          <div className="flex flex-col gap-1.5">
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="font-bold text-slate-300">Room Boundary Size</span>
+                              <span className="font-mono text-sky-400 font-bold">{boundaryWidth}m × {boundaryHeight}m</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-1 bg-slate-800 px-2 py-1 rounded-lg border border-slate-700 flex-1">
+                                <span className="text-slate-400 text-[10px] font-bold">W:</span>
+                                <NumberInput
+                                  value={boundaryWidth}
+                                  onChange={handleUpdateBoundaryWidth}
+                                  min={3}
+                                  max={200}
+                                  className="w-10 text-center font-bold text-xs text-white focus:outline-none bg-transparent font-mono"
+                                />
+                                <span className="text-slate-400 text-[10px]">m</span>
+                              </div>
+                              <span className="text-slate-500 text-xs">×</span>
+                              <div className="flex items-center gap-1 bg-slate-800 px-2 py-1 rounded-lg border border-slate-700 flex-1">
+                                <span className="text-slate-400 text-[10px] font-bold">H:</span>
+                                <NumberInput
+                                  value={boundaryHeight}
+                                  onChange={handleUpdateBoundaryHeight}
+                                  min={3}
+                                  max={200}
+                                  className="w-10 text-center font-bold text-xs text-white focus:outline-none bg-transparent font-mono"
+                                />
+                                <span className="text-slate-400 text-[10px]">m</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={handleAutoFitBoundary}
+                                className="flex-1 py-1 bg-slate-800 hover:bg-slate-700 text-sky-300 rounded-lg text-[10px] font-bold transition-all border border-slate-700 cursor-pointer"
+                              >
+                                Auto-fit Boundary
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleFitShapeToBoundary}
+                                className="flex-1 py-1 bg-slate-800 hover:bg-slate-700 text-sky-300 rounded-lg text-[10px] font-bold transition-all border border-slate-700 cursor-pointer"
+                              >
+                                Fit Shape
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Selected Corner */}
+                          <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-800">
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="font-bold text-slate-300">
+                                {selectedCornerIdx !== null ? `Corner #${selectedCornerIdx + 1}` : 'Corners'} ({customPoints.length})
+                              </span>
+                              <span className="text-[10px] text-slate-400">Drag circle on canvas</span>
+                            </div>
+                            {selectedCornerIdx !== null && customPoints[selectedCornerIdx] ? (
+                              <div className="flex items-center gap-2 bg-slate-800/80 p-2 rounded-xl border border-slate-700">
+                                <span className="w-5 h-5 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-[10px] flex-shrink-0">
+                                  {selectedCornerIdx + 1}
+                                </span>
+                                <div className="flex items-center gap-1 bg-slate-900 px-2 py-0.5 rounded-lg border border-slate-700 flex-1">
+                                  <span className="text-slate-400 text-[10px]">X:</span>
+                                  <NumberInput
+                                    value={customPoints[selectedCornerIdx].x}
+                                    min={0}
+                                    max={Math.max(200, boundaryWidth)}
+                                    onChange={(val) => handleUpdateCustomPoint(selectedCornerIdx, 'x', val)}
+                                    className="w-10 text-center font-bold text-xs text-white focus:outline-none bg-transparent"
+                                  />
+                                </div>
+                                <div className="flex items-center gap-1 bg-slate-900 px-2 py-0.5 rounded-lg border border-slate-700 flex-1">
+                                  <span className="text-slate-400 text-[10px]">Y:</span>
+                                  <NumberInput
+                                    value={customPoints[selectedCornerIdx].y}
+                                    min={0}
+                                    max={Math.max(200, boundaryHeight)}
+                                    onChange={(val) => handleUpdateCustomPoint(selectedCornerIdx, 'y', val)}
+                                    className="w-10 text-center font-bold text-xs text-white focus:outline-none bg-transparent"
+                                  />
+                                </div>
+                                {customPoints.length > 3 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteCustomPoint(selectedCornerIdx)}
+                                    className="p-1.5 bg-rose-500/20 hover:bg-rose-600 text-rose-300 hover:text-white rounded-lg border border-rose-500/40 transition-colors cursor-pointer flex-shrink-0"
+                                    title="Delete this corner point"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <p className="text-[11px] text-slate-400 italic">Click any vertex circle on canvas to edit its exact coordinates.</p>
+                            )}
+                          </div>
+                        </div>
                       )}
                     </div>
 
-                    <div className="flex items-center gap-2 font-mono font-bold">
-                      <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-slate-200">
-                        <span className="text-slate-400 text-[10px]">X:</span>
-                        <input
-                          type="number"
-                          min={0}
-                          max={room.gridWidth}
-                          value={p.x}
-                          onChange={(e) => handleUpdateCustomPoint(idx, 'x', parseInt(e.target.value, 10) || 0)}
-                          className="w-10 text-center font-bold text-slate-800 focus:outline-none"
-                        />
+                    {/* Blueprint Stage Bottom Instructions Bar */}
+                    <div className="px-4 py-2 bg-slate-900/95 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400 z-10 flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sky-300 font-bold">💡 How to edit:</span>
+                        <span>Click <strong className="text-sky-300 font-mono">+</strong> on any wall to add corner • Drag circles to reposition • Select & tap <strong className="text-rose-400">×</strong> or Backspace to delete</span>
                       </div>
-                      <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-slate-200">
-                        <span className="text-slate-400 text-[10px]">Y:</span>
-                        <input
-                          type="number"
-                          min={0}
-                          max={room.gridHeight}
-                          value={p.y}
-                          onChange={(e) => handleUpdateCustomPoint(idx, 'y', parseInt(e.target.value, 10) || 0)}
-                          className="w-10 text-center font-bold text-slate-800 focus:outline-none"
-                        />
+                      <div className="flex items-center gap-3">
+                        <div className="text-slate-400 font-mono text-[10px]">
+                          {customPoints.length} Vertices • {customPoints.length} Walls
+                        </div>
+                        {!isStageFullscreen ? (
+                          <button
+                            type="button"
+                            onClick={enterStageFullscreen}
+                            className="text-sky-400 hover:text-sky-300 font-bold flex items-center gap-1 cursor-pointer transition-colors text-[10px]"
+                            title="Expand blueprint stage to full screen"
+                          >
+                            <Maximize2 className="w-3 h-3" />
+                            <span>Fullscreen Stage</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={exitStageFullscreen}
+                            className="text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 cursor-pointer transition-colors text-[10px]"
+                            title="Exit stage full screen"
+                          >
+                            <Minimize2 className="w-3 h-3" />
+                            <span>Exit Fullscreen Stage (Esc)</span>
+                          </button>
+                        )}
                       </div>
+                    </div>
+                  </div>
+
+              {/* RIGHT COLUMN: Controls Sidebar & Preset Override */}
+              <div className="w-full lg:w-96 xl:w-[420px] flex flex-col gap-3 min-h-0 flex-shrink-0 bg-slate-50/80 p-3.5 sm:p-4 rounded-2xl border border-slate-200/80">
+                {/* 0. Room Boundary Size Card */}
+                <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                      <Sliders className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Room Boundary Size</span>
+                    </h4>
+                    <span className="text-[11px] font-mono text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md font-bold">
+                      {boundaryWidth}m × {boundaryHeight}m
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-snug">
+                    Set the overall room boundary. The architectural stage and all coordinates scale to fit.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-xs flex-1">
+                      <span className="text-slate-400 text-[10px] font-bold">W:</span>
+                      <NumberInput
+                        value={boundaryWidth}
+                        onChange={handleUpdateBoundaryWidth}
+                        min={3}
+                        max={200}
+                        className="w-12 text-center font-bold text-sm text-slate-800 focus:outline-none bg-transparent font-mono"
+                      />
+                      <span className="text-slate-400 text-[10px]">m</span>
+                    </div>
+                    <span className="text-slate-300 text-xs font-bold">×</span>
+                    <div className="flex items-center gap-1 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-xs flex-1">
+                      <span className="text-slate-400 text-[10px] font-bold">H:</span>
+                      <NumberInput
+                        value={boundaryHeight}
+                        onChange={handleUpdateBoundaryHeight}
+                        min={3}
+                        max={200}
+                        className="w-12 text-center font-bold text-sm text-slate-800 focus:outline-none bg-transparent font-mono"
+                      />
+                      <span className="text-slate-400 text-[10px]">m</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-[11px] gap-2 flex-wrap">
+                    <label className="flex items-center gap-1.5 cursor-pointer text-slate-600 hover:text-slate-900 select-none">
+                      <input
+                        type="checkbox"
+                        checked={scaleShapeWithBoundary}
+                        onChange={(e) => setScaleShapeWithBoundary(e.target.checked)}
+                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer"
+                      />
+                      <span>Scale shape with size</span>
+                    </label>
+
+                    <div className="flex items-center gap-1.5">
                       <button
-                        onClick={() => handleDeleteCustomPoint(idx)}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                        title="Remove corner point"
+                        type="button"
+                        onClick={handleAutoFitBoundary}
+                        className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-[10px] font-bold transition-all cursor-pointer shadow-xs"
+                        title="Expand boundary box to surround all shape corners"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        Auto-fit Boundary
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleFitShapeToBoundary}
+                        className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-[10px] font-bold transition-all cursor-pointer shadow-xs"
+                        title="Scale and stretch the shape to fill the current boundary box"
+                      >
+                        Fit Shape
                       </button>
                     </div>
                   </div>
-                );
-              })}
-              </div>
+                </div>
 
+                {/* 1. Wall Corner Manager Card */}
+                <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Wall Corner Manager</span>
+                    </h4>
+                    <span className="text-[11px] font-mono text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md font-bold">
+                      {customPoints.length} corners
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-snug">
+                    Click any <span className="font-bold text-sky-600 font-mono">+</span> on the blueprint stage, or select a wall below.
+                  </p>
+                  <div className="flex items-center gap-2 pt-1">
+                    <select
+                      value={targetEdgeIdx}
+                      onChange={(e) => setTargetEdgeIdx(parseInt(e.target.value, 10))}
+                      className="bg-slate-50 text-slate-800 text-xs font-bold px-2.5 py-1.5 rounded-xl border border-slate-300 focus:outline-none focus:border-blue-500 shadow-xs cursor-pointer flex-1"
+                      title="Select which wall to insert a new corner on"
+                    >
+                      {customPoints.map((_, i) => {
+                        const next = (i + 1) % customPoints.length;
+                        return (
+                          <option key={i} value={i}>
+                            Wall {i + 1} (Corners {i + 1} → {next + 1})
+                          </option>
+                        );
+                      })}
+                    </select>
+                    <button
+                      onClick={() => handleAddCustomPoint(targetEdgeIdx)}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition-all active:scale-95 cursor-pointer flex-shrink-0"
+                      title={`Insert a new corner on Wall ${targetEdgeIdx + 1}`}
+                    >
+                      <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                      <span>Add Corner</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Vertices List Header */}
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Corner Coordinates
+                  </span>
+                  <span className="text-[11px] text-slate-400 font-medium">
+                    Drag on canvas or edit X/Y
+                  </span>
+                </div>
+
+                {/* Scrollable Vertices List */}
+                <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                  {customPoints.map((p, idx) => {
+                    const isCurrent = draggingPointIdx === idx || selectedCornerIdx === idx;
+                    const nextCornerIdx = ((idx + 1) % customPoints.length) + 1;
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => {
+                          setSelectedCornerIdx(idx);
+                          setTargetEdgeIdx(idx);
+                        }}
+                        className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 text-xs transition-all cursor-pointer ${
+                          isCurrent
+                            ? 'bg-blue-50/90 border-blue-400 shadow-xs ring-1 ring-blue-300'
+                            : 'bg-white hover:bg-slate-100/70 border-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 font-bold text-slate-700 flex-shrink-0">
+                          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${
+                            isCurrent ? 'bg-blue-600 text-white font-extrabold' : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            {idx + 1}
+                          </span>
+                          <span>Corner #{idx + 1}</span>
+                          {isCurrent && (
+                            <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded-md">
+                              Selected
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1.5 font-mono font-bold flex-wrap justify-end" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center gap-1 bg-slate-50 px-2 py-1 rounded-lg border border-slate-200 shadow-xs">
+                            <span className="text-slate-400 text-[10px]">X:</span>
+                            <NumberInput
+                              value={p.x}
+                              min={0}
+                              max={Math.max(200, boundaryWidth)}
+                              onChange={(val) => handleUpdateCustomPoint(idx, 'x', val)}
+                              className="w-10 text-center font-bold text-slate-800 focus:outline-none bg-transparent"
+                            />
+                          </div>
+                          <div className="flex items-center gap-1 bg-slate-50 px-2 py-1 rounded-lg border border-slate-200 shadow-xs">
+                            <span className="text-slate-400 text-[10px]">Y:</span>
+                            <NumberInput
+                              value={p.y}
+                              min={0}
+                              max={Math.max(200, boundaryHeight)}
+                              onChange={(val) => handleUpdateCustomPoint(idx, 'y', val)}
+                              className="w-10 text-center font-bold text-slate-800 focus:outline-none bg-transparent"
+                            />
+                          </div>
+
+                          <button
+                            onClick={() => handleInsertPointAtEdge(idx)}
+                            className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+                            title={`Add a new corner on Wall #${idx + 1} (between Corner ${idx + 1} and ${nextCornerIdx})`}
+                          >
+                            <Plus className="w-3 h-3 stroke-[2.5]" />
+                            <span className="hidden sm:inline">Add After</span>
+                          </button>
+
+                          <button
+                            onClick={() => handleDeleteCustomPoint(idx)}
+                            disabled={customPoints.length <= 3}
+                            className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                              customPoints.length <= 3
+                                ? 'text-slate-300 cursor-not-allowed'
+                                : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
+                            }`}
+                            title={customPoints.length <= 3 ? 'A polygon needs at least 3 corners' : 'Remove corner point'}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* 3. Preset Layout Override Card (The Single Button to Deliberately Override Architecture) */}
+                <div className="bg-amber-50/70 border border-amber-200/90 rounded-xl p-3 flex flex-col gap-2 shadow-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-amber-950 flex items-center gap-1.5 uppercase tracking-wide">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Preset Template Override</span>
+                    </span>
+                    <span className="text-[10px] font-bold text-amber-700 bg-amber-100/90 px-1.5 py-0.5 rounded">
+                      Override
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-amber-900/80 leading-snug">
+                    Replace custom corners with a standard architectural template layout.
+                  </p>
+                  <div className="flex flex-col gap-1.5 pt-0.5">
+                    <select
+                      value={`${selectedPresetId}:${selectedPresetVariation}`}
+                      onChange={(e) => {
+                        const [id, variation] = e.target.value.split(':');
+                        setSelectedPresetId(id as RoomShapeType);
+                        setSelectedPresetVariation(variation || 'br');
+                      }}
+                      className="bg-white text-slate-800 text-xs font-bold px-2.5 py-1.5 rounded-lg border border-amber-300 focus:outline-none focus:border-amber-500 shadow-xs cursor-pointer"
+                    >
+                      <option value="rectangle:standard">Rectangular Room (Standard 4 Walls)</option>
+                      <option value="l_shaped:br">L-Shaped Room (Corner: Bottom-Right)</option>
+                      <option value="l_shaped:bl">L-Shaped Room (Corner: Bottom-Left)</option>
+                      <option value="l_shaped:tr">L-Shaped Room (Corner: Top-Right)</option>
+                      <option value="l_shaped:tl">L-Shaped Room (Corner: Top-Left)</option>
+                      <option value="t_shaped:south">T-Shaped Space (Wing: South)</option>
+                      <option value="t_shaped:north">T-Shaped Space (Wing: North)</option>
+                      <option value="t_shaped:east">T-Shaped Space (Wing: East)</option>
+                      <option value="t_shaped:west">T-Shaped Space (Wing: West)</option>
+                      <option value="u_shaped:standard">U-Shaped Courtyard Layout</option>
+                    </select>
+
+                    <button
+                      onClick={handleOverrideWithPreset}
+                      className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-sm transition-all active:scale-95 cursor-pointer"
+                      title="Override current custom shape and replace with chosen preset template"
+                    >
+                      <RotateCw className="w-3.5 h-3.5" />
+                      <span>Override Layout with Preset</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -942,7 +2008,7 @@ export const RoomShapeModal: React.FC = () => {
                   </h4>
                 </div>
                 <button
-                  onClick={handleAddDoor}
+                  onClick={() => handleAddDoor()}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition-all active:scale-95 cursor-pointer"
                   title="Add another door to this room"
                 >
@@ -1000,7 +2066,61 @@ export const RoomShapeModal: React.FC = () => {
                 )}
               </div>
 
-              {selectedDoor && (
+              {doorsList.length === 0 ? (
+                <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-6 text-center space-y-4">
+                  <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200/80 flex items-center justify-center mx-auto text-amber-500 shadow-sm">
+                    <DoorOpen className="w-7 h-7" />
+                  </div>
+                  <div>
+                    <h5 className="font-extrabold text-sm text-slate-800">No Doors in this Room</h5>
+                    <p className="text-xs text-slate-500 max-w-xs mx-auto mt-0.5">
+                      Add an entrance door to specify where you enter this room from or connect to other spaces.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-2 justify-center items-center">
+                    <button
+                      onClick={() => handleAddDoor('bottom')}
+                      className="w-full sm:w-auto px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl shadow-md shadow-amber-500/20 transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Add Main Entrance (Bottom Wall)</span>
+                    </button>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-200/60">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-2">
+                      Or place directly on specific wall:
+                    </span>
+                    <div className="flex flex-wrap gap-1.5 justify-center">
+                      <button
+                        onClick={() => handleAddDoor('bottom')}
+                        className="px-2.5 py-1 text-xs font-semibold bg-white border border-slate-200 hover:bg-amber-50 hover:border-amber-300 text-slate-700 rounded-lg cursor-pointer transition-colors"
+                      >
+                        Bottom Wall (South)
+                      </button>
+                      <button
+                        onClick={() => handleAddDoor('top')}
+                        className="px-2.5 py-1 text-xs font-semibold bg-white border border-slate-200 hover:bg-amber-50 hover:border-amber-300 text-slate-700 rounded-lg cursor-pointer transition-colors"
+                      >
+                        Top Wall (North)
+                      </button>
+                      <button
+                        onClick={() => handleAddDoor('left')}
+                        className="px-2.5 py-1 text-xs font-semibold bg-white border border-slate-200 hover:bg-amber-50 hover:border-amber-300 text-slate-700 rounded-lg cursor-pointer transition-colors"
+                      >
+                        Left Wall (West)
+                      </button>
+                      <button
+                        onClick={() => handleAddDoor('right')}
+                        className="px-2.5 py-1 text-xs font-semibold bg-white border border-slate-200 hover:bg-amber-50 hover:border-amber-300 text-slate-700 rounded-lg cursor-pointer transition-colors"
+                      >
+                        Right Wall (East)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : selectedDoor ? (
                 <>
                   {/* Door Name Input */}
                   <div className="flex items-center gap-2">
@@ -1355,41 +2475,51 @@ export const RoomShapeModal: React.FC = () => {
                     </div>
                   </div>
                 </>
-              )}
+              ) : null}
 
             </div>
           )}
 
-        </div>
+            </div>
+          );
+        })()}
 
         {/* Footer */}
-        <div className="p-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-2">
-          {activeTab === 'custom' ? (
-            <>
+        <div className="px-4 sm:px-6 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 flex-shrink-0">
+          <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+            {activeTab === 'architecture' ? (
+              <span className="hidden sm:inline">
+                Drag vertices on the blueprint or adjust numbers on the right.
+              </span>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-2">
+            {activeTab === 'architecture' ? (
+              <>
+                <button
+                  onClick={() => setRoomShapeModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-200/70 font-bold text-xs transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveCustomShape}
+                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-500/20 transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Save Room Shape</span>
+                </button>
+              </>
+            ) : (
               <button
                 onClick={() => setRoomShapeModalOpen(false)}
-                className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-200/70 font-bold text-xs transition-colors cursor-pointer"
+                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-500/20 transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
               >
-                Cancel
+                <Check className="w-4 h-4" />
+                <span>Done</span>
               </button>
-              <button
-                onClick={handleSaveCustomShape}
-                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition-all active:scale-95 cursor-pointer"
-              >
-                Save Custom Shape
-              </button>
-            </>
-          ) : (
-            <>
-              <div />
-              <button
-                onClick={() => setRoomShapeModalOpen(false)}
-                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition-all active:scale-95 cursor-pointer"
-              >
-                Done
-              </button>
-            </>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>

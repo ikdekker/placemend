@@ -7,29 +7,44 @@ import { FurnitureGraphic } from './FurnitureGraphic';
 import { useVisualSearch } from '../hooks/useVisualSearch';
 import { 
   RotateCw, 
+  RotateCcw,
   Trash2, 
   Grid, 
   Eye, 
-  Pentagon,
-  Maximize2,
-  Sliders,
-  Sparkles,
-  DoorOpen,
-  FlipHorizontal,
-  FlipVertical,
-  Ruler
+  Pentagon, 
+  Maximize2, 
+  Minimize2,
+  Focus,
+  Sliders, 
+  Sparkles, 
+  DoorOpen, 
+  FlipHorizontal, 
+  FlipVertical, 
+  Ruler,
+  MapPin,
+  Plus,
+  Minus,
+  FolderOpen,
+  X,
+  Link,
+  ArrowRight,
+  ArrowDownRight
 } from 'lucide-react';
-import { rotateRoom90Clockwise, mirrorRoom, getDoorSvgGeometry, nudgeDoor, getRoomDoors, snapFurniturePosition, getRoomWallSegments } from '../utils/roomGeometry';
+import { rotateRoom90Clockwise, mirrorRoom, getDoorSvgGeometry, getRoomDoors, snapFurniturePosition, getRoomWallSegments } from '../utils/roomGeometry';
+import { scheduleAutoSync } from '../services/apiSync';
+import { seedDemoDataIfEmpty, scheduleSeedIfEmpty } from '../db/sampleData';
 
 export const FloorCanvas: React.FC = () => {
   const {
     appMode,
+    setAppMode,
     selectedRoomId,
     selectedFurnitureId,
     highlightedFurnitureId,
     setSelectedFurnitureId,
     setSelectedRoomId,
     setRoomShapeModalOpen,
+    setRoomManagerOpen,
     zoom,
     setZoom,
     panOffset,
@@ -41,6 +56,8 @@ export const FloorCanvas: React.FC = () => {
     toggleShowLabels,
     showDimensions,
     toggleShowDimensions,
+    setConnectRoomModalOpen,
+    setFurnitureLibraryOpen,
   } = useAppStore();
 
   const { isSearching, matchingFurnitureIds, matchCountsByFurniture, matchingRoomIds } = useVisualSearch();
@@ -70,14 +87,39 @@ export const FloorCanvas: React.FC = () => {
     targetFurnitureId: null,
   });
   const hasDragged = useRef(false);
+  const isPointerDownOnCanvas = useRef(false);
+
+  // Track native browser fullscreen state
+  const [isBrowserFullscreen, setIsBrowserFullscreen] = useState(false);
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsBrowserFullscreen(!!document.fullscreenElement);
+    };
+    handleFullscreenChange();
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const toggleBrowserFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen?.();
+      } else {
+        await document.exitFullscreen?.();
+      }
+    } catch (err) {
+      console.warn('Fullscreen toggle failed:', err);
+    }
+  };
 
   // Dragging / Moving Furniture (Only enabled in Edit Mode)
   const [draggingFurnitureId, setDraggingFurnitureId] = useState<string | null>(null);
   const [dragStartPos, setDragStartPos] = useState({ mouseX: 0, mouseY: 0, origX: 0, origY: 0 });
   const [dragLivePos, setDragLivePos] = useState<{ id: string; x: number; y: number } | null>(null);
 
-  // Resizing Furniture from bottom-right handle (Only enabled in Edit Mode)
+  // Resizing Furniture from handle (Only enabled in Edit Mode)
   const [resizingFurnitureId, setResizingFurnitureId] = useState<string | null>(null);
+  const [resizeHandleType, setResizeHandleType] = useState<'corner' | 'width' | 'length'>('corner');
   const [resizeStart, setResizeStart] = useState({ mouseX: 0, mouseY: 0, origW: 0, origL: 0 });
   const [resizeLiveDim, setResizeLiveDim] = useState<{ id: string; w: number; l: number } | null>(null);
 
@@ -91,15 +133,54 @@ export const FloorCanvas: React.FC = () => {
   const [doorLiveOffset, setDoorLiveOffset] = useState<number | null>(null);
   const hasDoorDragged = useRef(false);
 
+  // Robust Room Query with auto-healing fallback to ensure rooms always exist
   const room = useLiveQuery(async () => {
-    if (!selectedRoomId) return undefined;
-    return await db.rooms.get(selectedRoomId);
+    if (selectedRoomId) {
+      const r = await db.rooms.get(selectedRoomId);
+      if (r) return r;
+    }
+    const all = await db.rooms.toArray();
+    if (all.length > 0) return all[0];
+
+    // Self-healing: if the DB has 0 rooms, seed the baseline layout (outside this read-only query)
+    scheduleSeedIfEmpty();
+    return undefined;
   }, [selectedRoomId]);
 
+  // Keep store synchronized with active room if ID is null or missing from DB
+  useEffect(() => {
+    if (!selectedRoomId && room) {
+      setSelectedRoomId(room.id);
+      return;
+    }
+    if (selectedRoomId) {
+      let isMounted = true;
+      db.rooms.get(selectedRoomId).then((r) => {
+        if (!r && isMounted) {
+          if (room) {
+            setSelectedRoomId(room.id);
+          } else {
+            db.rooms.toArray().then((all) => {
+              if (all.length > 0 && isMounted) {
+                setSelectedRoomId(all[0].id);
+              }
+            });
+          }
+        }
+      });
+      return () => {
+        isMounted = false;
+      };
+    }
+  }, [selectedRoomId, room, setSelectedRoomId]);
+
+  const allRooms = useLiveQuery(() => db.rooms.toArray()) || [];
+
   const furnitureList = useLiveQuery(async () => {
-    if (!selectedRoomId) return [];
-    return await db.furniture.where('roomId').equals(selectedRoomId).toArray();
-  }, [selectedRoomId]) || [];
+    const activeId = room?.id || selectedRoomId;
+    if (!activeId) return [];
+    return await db.furniture.where('roomId').equals(activeId).toArray();
+  }, [room?.id, selectedRoomId]) || [];
 
   // Items grouped by furniture for unique item counts
   const itemCountsByFurniture = useLiveQuery(async () => {
@@ -128,8 +209,10 @@ export const FloorCanvas: React.FC = () => {
   }, [isSearching, matchingRoomIds, selectedRoomId]) || [];
 
   const unitSize = room?.unitSize || 32;
-  const gridW = room?.gridWidth || 26;
-  const gridH = room?.gridHeight || 18;
+  const maxPolyX = room?.polygonPoints && room.polygonPoints.length > 0 ? Math.max(...room.polygonPoints.map((p) => p.x)) : 0;
+  const maxPolyY = room?.polygonPoints && room.polygonPoints.length > 0 ? Math.max(...room.polygonPoints.map((p) => p.y)) : 0;
+  const gridW = Math.max(room?.gridWidth || 26, maxPolyX);
+  const gridH = Math.max(room?.gridHeight || 18, maxPolyY);
 
   const roomDoors = room ? getRoomDoors(room) : [];
 
@@ -141,6 +224,25 @@ export const FloorCanvas: React.FC = () => {
       geo: getDoorSvgGeometry(effectiveDoor, gridW, gridH, unitSize, room?.polygonPoints),
     };
   });
+
+  // Walk-through portals for doors that sit close together would overlap; step later ones outward a row
+  const portalPositions = new Map<string, { x: number; y: number }>();
+  {
+    const placed: { x: number; y: number; w: number }[] = [];
+    const candidates = doorsWithGeo
+      .filter(({ door }) => door.targetRoomId)
+      .map(({ door, geo }) => ({ door, pos: { ...(geo.exteriorPortalPos || geo.badgePos) } }))
+      .sort((a, b) => a.pos.x - b.pos.x);
+    for (const { door, pos } of candidates) {
+      const name = allRooms.find((r) => r.id === door.targetRoomId)?.name || '';
+      const w = (Math.min(name.length, 22) * 7 + 64) / zoom; // approx. pill width, in canvas units (pills are counter-scaled)
+      while (placed.some((p) => Math.abs(p.x - pos.x) < (p.w + w) / 2 + 6 && Math.abs(p.y - pos.y) < 34 / zoom)) {
+        pos.y += pos.y < (gridH * unitSize) / 2 ? -36 / zoom : 36 / zoom; // step away from the room
+      }
+      placed.push({ ...pos, w });
+      portalPositions.set(door.id || '', pos);
+    }
+  }
 
   // Auto-fit room to viewport (statically locks and centers the room)
   const fitRoomToViewport = useCallback(() => {
@@ -156,13 +258,14 @@ export const FloorCanvas: React.FC = () => {
     const roomH = rGridH * rUnitSize;
 
     const isMobile = window.innerWidth < 768;
-    // Margins around the room
-    const padX = isMobile ? 24 : 48;
-    const padY = isMobile ? 28 : 48;
+    // Margins around the room (with generous breathing space for exterior doorway portals)
+    const padX = isMobile ? 160 : 200; // labels and portals extend past the walls
+    const padY = isMobile ? 280 : 200; // room for door portals above/below and the mobile nav
 
     const scaleX = (containerW - padX) / roomW;
     const scaleY = (containerH - padY) / roomH;
-    const optimalZoom = Math.max(0.18, Math.min(1.15, Math.min(scaleX, scaleY)));
+    // Rooms are in meters (32px/m), so small rooms need well over 1x to fill a phone screen
+    const optimalZoom = Math.max(0.18, Math.min(2, Math.min(scaleX, scaleY)));
 
     const centeredX = (containerW - roomW * optimalZoom) / 2;
     const centeredY = (containerH - roomH * optimalZoom) / 2;
@@ -174,14 +277,14 @@ export const FloorCanvas: React.FC = () => {
     });
   }, [room, setZoom, setPanOffset]);
 
-  // Auto-fit on room change or fitViewTrigger
+  // Auto-fit on room change, appMode change, or fitViewTrigger
   useEffect(() => {
     fitRoomToViewport();
     const timer = setTimeout(() => {
       fitRoomToViewport();
     }, 100);
     return () => clearTimeout(timer);
-  }, [room?.id, room?.gridWidth, room?.gridHeight, fitViewTrigger, fitRoomToViewport]);
+  }, [room?.id, room?.gridWidth, room?.gridHeight, appMode, fitViewTrigger, fitRoomToViewport]);
 
   // Window resize handler
   useEffect(() => {
@@ -196,12 +299,14 @@ export const FloorCanvas: React.FC = () => {
   const handlePointerDown = (clientX: number, clientY: number, target: EventTarget) => {
     const targetEl = target as HTMLElement;
 
-    // Never trigger canvas drag or deselect when clicking buttons, toolbars, door handles, or inputs
+    // Never trigger canvas drag or deselect when clicking buttons, toolbars, door handles, resize handles, or inputs
     if (targetEl && typeof targetEl.closest === 'function') {
-      if (targetEl.closest('button, [data-toolbar], [data-door-handle], input, select, textarea')) {
+      if (targetEl.closest('button, [data-toolbar], [data-door-handle], [data-resize-handle], input, select, textarea')) {
+        isPointerDownOnCanvas.current = false;
         return;
       }
     }
+    isPointerDownOnCanvas.current = true;
 
     const furnEl = targetEl && typeof targetEl.closest === 'function' ? targetEl.closest('[data-furniture-id]') : null;
     const furnId = furnEl ? furnEl.getAttribute('data-furniture-id') : null;
@@ -311,6 +416,17 @@ export const FloorCanvas: React.FC = () => {
         const w = isRot ? furn.dimension.length : furn.dimension.width;
         const l = isRot ? furn.dimension.width : furn.dimension.length;
 
+        // Neighbor furniture list for modular edge-snapping (excluding currently dragged piece)
+        const otherFurns = furnitureList
+          .filter((f) => f.id !== draggingFurnitureId)
+          .map((f) => ({
+            x: f.position.x,
+            y: f.position.y,
+            width: f.dimension.width,
+            length: f.dimension.length,
+            rotation: f.position.rotation,
+          }));
+
         const snapped = snapFurniturePosition(
           targetX,
           targetY,
@@ -319,7 +435,8 @@ export const FloorCanvas: React.FC = () => {
           gridW,
           gridH,
           room?.polygonPoints,
-          gridSnap
+          gridSnap,
+          otherFurns
         );
 
         setDragLivePos({
@@ -331,28 +448,106 @@ export const FloorCanvas: React.FC = () => {
       return;
     }
 
-    // Resizing furniture in Edit Mode
+    // Resizing furniture in Edit Mode (supports orientation rotation & room boundary clamping)
     if (resizingFurnitureId && appMode === 'edit') {
-      const dx = (clientX - resizeStart.mouseX) / (unitSize * zoom);
-      const dy = (clientY - resizeStart.mouseY) / (unitSize * zoom);
+      const furn = furnitureList.find((f) => f.id === resizingFurnitureId);
+      if (furn) {
+        const dx = (clientX - resizeStart.mouseX) / (unitSize * zoom);
+        const dy = (clientY - resizeStart.mouseY) / (unitSize * zoom);
 
-      let newW = resizeStart.origW + dx;
-      let newL = resizeStart.origL + dy;
+        const isRot = (furn.position.rotation || 0) % 180 !== 0;
 
-      if (gridSnap) {
-        newW = Math.round(newW);
-        newL = Math.round(newL);
+        // Boundaries inside room
+        const posX = furn.position.x;
+        const posY = furn.position.y;
+        const maxHoriz = Math.max(1, gridW - posX);
+        const maxVert = Math.max(1, gridH - posY);
+        const maxW = isRot ? maxVert : maxHoriz;
+        const maxL = isRot ? maxHoriz : maxVert;
+
+        let newW = resizeStart.origW;
+        let newL = resizeStart.origL;
+
+        if (resizeHandleType === 'corner') {
+          const deltaW = isRot ? dy : dx;
+          const deltaL = isRot ? dx : dy;
+          newW = resizeStart.origW + deltaW;
+          newL = resizeStart.origL + deltaL;
+        } else if (resizeHandleType === 'width') {
+          if (isRot) {
+            newL = resizeStart.origL + dx;
+          } else {
+            newW = resizeStart.origW + dx;
+          }
+        } else if (resizeHandleType === 'length') {
+          if (isRot) {
+            newW = resizeStart.origW + dy;
+          } else {
+            newL = resizeStart.origL + dy;
+          }
+        }
+
+        if (gridSnap) {
+          newW = Math.round(newW * 10) / 10;
+          newL = Math.round(newL * 10) / 10;
+        } else {
+          newW = Math.round(newW * 100) / 100;
+          newL = Math.round(newL * 100) / 100;
+        }
+
+        newW = Math.max(0.2, Math.min(maxW, newW));
+        newL = Math.max(0.2, Math.min(maxL, newL));
+
+        setResizeLiveDim({
+          id: resizingFurnitureId,
+          w: newW,
+          l: newL,
+        });
       }
-
-      newW = Math.max(1, Math.min(18, newW));
-      newL = Math.max(1, Math.min(18, newL));
-
-      setResizeLiveDim({
-        id: resizingFurnitureId,
-        w: newW,
-        l: newL,
-      });
+      return;
     }
+  };
+
+  // Start resizing furniture from handle (corner, width edge, or length edge)
+  const startResizing = (
+    e: React.MouseEvent | React.TouchEvent,
+    furnId: string,
+    type: 'corner' | 'width' | 'length'
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    const clientX = 'touches' in e && e.touches[0] ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = 'touches' in e && e.touches[0] ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+
+    const furn = furnitureList.find((f) => f.id === furnId);
+    if (!furn) return;
+
+    pointerDownPos.current = {
+      x: clientX,
+      y: clientY,
+      time: Date.now(),
+      targetFurnitureId: furnId,
+    };
+    hasDragged.current = false;
+    isPointerDownOnCanvas.current = false;
+
+    setDraggingFurnitureId(null);
+    setIsPanning(false);
+    setSelectedFurnitureId(furnId);
+    setResizingFurnitureId(furnId);
+    setResizeHandleType(type);
+    setResizeStart({
+      mouseX: clientX,
+      mouseY: clientY,
+      origW: furn.dimension.width,
+      origL: furn.dimension.length,
+    });
+    setResizeLiveDim({
+      id: furnId,
+      w: furn.dimension.width,
+      l: furn.dimension.length,
+    });
   };
 
   const handleDoorDragStart = (e: React.MouseEvent | React.TouchEvent, doorId: string) => {
@@ -395,7 +590,7 @@ export const FloorCanvas: React.FC = () => {
         'position.x': dragLivePos.x,
         'position.y': dragLivePos.y,
         updatedAt: Date.now(),
-      });
+      }).then(() => scheduleAutoSync());
       setDragLivePos(null);
     }
 
@@ -405,13 +600,15 @@ export const FloorCanvas: React.FC = () => {
         'dimension.width': resizeLiveDim.w,
         'dimension.length': resizeLiveDim.l,
         updatedAt: Date.now(),
-      });
+      }).then(() => scheduleAutoSync());
       setResizeLiveDim(null);
     }
 
-    // If the finger/mouse was stationary (< 5px movement), it's a clean TAP:
+    // If the finger/mouse was stationary (< 5px movement), it's a clean TAP on canvas:
     if (!hasDragged.current) {
-      if (pointerDownPos.current.targetFurnitureId) {
+      if (!isPointerDownOnCanvas.current) {
+        // Did not originate from canvas (e.g. was on a toolbar, resize handle, or button) -> keep selection untouched
+      } else if (pointerDownPos.current.targetFurnitureId) {
         // Tapped a furniture piece
         setSelectedFurnitureId(pointerDownPos.current.targetFurnitureId);
       } else {
@@ -419,6 +616,7 @@ export const FloorCanvas: React.FC = () => {
         setSelectedFurnitureId(null);
       }
     }
+    isPointerDownOnCanvas.current = false;
 
     // Reset hasDragged after gesture completes so subsequent clicks are clean
     setTimeout(() => {
@@ -430,7 +628,7 @@ export const FloorCanvas: React.FC = () => {
     setResizingFurnitureId(null);
   };
 
-  // Global listeners to prevent drag loss if cursor moves fast outside canvas
+  // Global listeners to prevent drag loss if cursor or touch moves fast outside canvas
   useEffect(() => {
     const handleGlobalMouseMove = (e: MouseEvent) => {
       if (draggingFurnitureId || resizingFurnitureId || isPanning) {
@@ -442,11 +640,29 @@ export const FloorCanvas: React.FC = () => {
         handlePointerUp();
       }
     };
+    const handleGlobalTouchMove = (e: TouchEvent) => {
+      if ((draggingFurnitureId || resizingFurnitureId || isPanning) && e.touches[0]) {
+        handlePointerMove(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    };
+    const handleGlobalTouchEnd = () => {
+      if (draggingFurnitureId || resizingFurnitureId || isPanning) {
+        handlePointerUp();
+      }
+    };
+
     window.addEventListener('mousemove', handleGlobalMouseMove);
     window.addEventListener('mouseup', handleGlobalMouseUp);
+    window.addEventListener('touchmove', handleGlobalTouchMove, { passive: true });
+    window.addEventListener('touchend', handleGlobalTouchEnd);
+    window.addEventListener('touchcancel', handleGlobalTouchEnd);
+
     return () => {
       window.removeEventListener('mousemove', handleGlobalMouseMove);
       window.removeEventListener('mouseup', handleGlobalMouseUp);
+      window.removeEventListener('touchmove', handleGlobalTouchMove);
+      window.removeEventListener('touchend', handleGlobalTouchEnd);
+      window.removeEventListener('touchcancel', handleGlobalTouchEnd);
     };
   });
 
@@ -496,7 +712,7 @@ export const FloorCanvas: React.FC = () => {
 
       if (initialDist > 0) {
         const scale = currentDist / initialDist;
-        const newZoom = Math.min(3, Math.max(0.15, initialZoom * scale));
+        const newZoom = Math.min(8, Math.max(0.15, initialZoom * scale));
 
         const dx = currentMid.x - initialMidpoint.x;
         const dy = currentMid.y - initialMidpoint.y;
@@ -527,16 +743,64 @@ export const FloorCanvas: React.FC = () => {
   };
 
   // Rotate selected furniture 90°
-  const rotateSelectedFurniture = async (e?: React.MouseEvent) => {
+  const rotateSelectedFurniture = async (e?: React.SyntheticEvent) => {
     e?.stopPropagation();
+    e?.preventDefault();
     if (!selectedFurnitureId) return;
-    const furn = await db.furniture.get(selectedFurnitureId);
+    const currentId = selectedFurnitureId;
+    const furn = await db.furniture.get(currentId);
     if (furn) {
       const nextRot = ((furn.position.rotation || 0) + 90) % 360;
-      await db.furniture.update(selectedFurnitureId, {
+      await db.furniture.update(currentId, {
         position: { ...furn.position, rotation: nextRot },
         updatedAt: Date.now(),
       });
+      scheduleAutoSync();
+      pointerDownPos.current.targetFurnitureId = currentId;
+      setSelectedFurnitureId(currentId);
+    }
+  };
+
+  // Flip / Mirror selected furniture orientation (e.g. chaise left <-> right)
+  const flipSelectedFurniture = async (e?: React.SyntheticEvent) => {
+    e?.stopPropagation();
+    e?.preventDefault();
+    if (!selectedFurnitureId) return;
+    const currentId = selectedFurnitureId;
+    const furn = await db.furniture.get(currentId);
+    if (furn) {
+      const nextMirrored = !furn.mirrored;
+      await db.furniture.update(currentId, {
+        mirrored: nextMirrored,
+        updatedAt: Date.now(),
+      });
+      scheduleAutoSync();
+      pointerDownPos.current.targetFurnitureId = currentId;
+      setSelectedFurnitureId(currentId);
+    }
+  };
+
+  // Quick resize dimension adjustments (+/- width or length in grid units)
+  const adjustFurnitureDimension = async (axis: 'w' | 'l', delta: number, e?: React.SyntheticEvent) => {
+    e?.stopPropagation();
+    e?.preventDefault();
+    if (!selectedFurnitureId) return;
+    const currentId = selectedFurnitureId;
+    const furn = await db.furniture.get(currentId);
+    if (furn) {
+      const newW = axis === 'w' ? Math.round(Math.max(0.2, Math.min(30, furn.dimension.width + delta)) * 10) / 10 : furn.dimension.width;
+      const newL = axis === 'l' ? Math.round(Math.max(0.2, Math.min(30, furn.dimension.length + delta)) * 10) / 10 : furn.dimension.length;
+      await db.furniture.update(currentId, {
+        dimension: {
+          ...furn.dimension,
+          width: newW,
+          length: newL,
+        },
+        updatedAt: Date.now(),
+      });
+      scheduleAutoSync();
+      pointerDownPos.current.targetFurnitureId = currentId;
+      setSelectedFurnitureId(currentId);
     }
   };
 
@@ -552,6 +816,7 @@ export const FloorCanvas: React.FC = () => {
         await db.containers.where('furnitureId').equals(selectedFurnitureId).delete();
         await db.furniture.delete(selectedFurnitureId);
       });
+      scheduleAutoSync();
       setSelectedFurnitureId(null);
     }
   };
@@ -565,6 +830,31 @@ export const FloorCanvas: React.FC = () => {
   const polygonStr = getPolygonPointsString(room?.polygonPoints);
   const roomPixelW = gridW * unitSize;
   const roomPixelH = gridH * unitSize;
+
+  if (!room) {
+    return (
+      <div className="relative flex-1 w-full h-full bg-slate-100 flex flex-col items-center justify-center p-6 text-center select-none">
+        <div className="w-16 h-16 rounded-3xl bg-blue-50 border border-blue-200 flex items-center justify-center mb-4 text-blue-600 shadow-sm animate-pulse">
+          <MapPin className="w-8 h-8" />
+        </div>
+        <h3 className="text-base sm:text-lg font-black text-slate-800 mb-1">Loading Apartment Rooms...</h3>
+        <p className="text-xs text-slate-500 max-w-xs mb-4">
+          Synchronizing your connected floor plan and furniture layout.
+        </p>
+        <button
+          onClick={async () => {
+            await seedDemoDataIfEmpty();
+            const r = await db.rooms.toArray();
+            if (r.length > 0) setSelectedRoomId(r[0].id);
+          }}
+          className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-2xl shadow-md transition-all active:scale-95 flex items-center gap-2 cursor-pointer"
+        >
+          <RotateCcw className="w-4 h-4" />
+          <span>Restore Apartment Layout</span>
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -597,7 +887,13 @@ export const FloorCanvas: React.FC = () => {
 
       {/* View Mode Compact Canvas Controls */}
       {appMode === 'view' && (
-        <div data-toolbar="view-controls" className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20 flex items-center gap-1.5 bg-white/95 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-slate-200 shadow-md text-slate-700">
+        <div
+          data-toolbar="view-controls"
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20 flex items-center gap-1.5 bg-white/95 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-slate-200 shadow-md text-slate-700"
+        >
           <button
             onClick={toggleShowDimensions}
             className={`flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl transition-colors cursor-pointer ${
@@ -620,18 +916,54 @@ export const FloorCanvas: React.FC = () => {
           <button
             onClick={fitRoomToViewport}
             className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer"
-            title="Reset Room Framing"
+            title="Recenter & Fit Room View"
           >
-            <Maximize2 className="w-3.5 h-3.5" />
+            <Focus className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={toggleBrowserFullscreen}
+            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer"
+            title={isBrowserFullscreen ? "Exit Fullscreen (F11 / Esc)" : "Fullscreen Canvas (F11)"}
+          >
+            {isBrowserFullscreen ? (
+              <Minimize2 className="w-3.5 h-3.5 text-blue-600" />
+            ) : (
+              <Maximize2 className="w-3.5 h-3.5" />
+            )}
           </button>
         </div>
       )}
 
       {/* Clean Edit Toolbar (Only visible when user actively enters Edit Mode) */}
       {appMode === 'edit' && (
-        <div data-toolbar="edit-controls" className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20 flex items-center gap-1.5 bg-white/95 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-slate-200 shadow-md text-slate-700">
+        <div
+          data-toolbar="edit-controls"
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20 flex items-center gap-1.5 bg-white/95 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-slate-200 shadow-md text-slate-700"
+        >
           <button
-            onClick={() => setRoomShapeModalOpen(true, 'presets')}
+            onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              setFurnitureLibraryOpen(true);
+            }}
+            className="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-xl text-white bg-blue-600 hover:bg-blue-700 shadow-xs transition-colors cursor-pointer"
+            title="Add Furniture, Tables, Couches, Counters or Fixtures"
+          >
+            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+            <span>Add Item</span>
+          </button>
+          <div className="w-px h-4 bg-slate-200" />
+          <button
+            onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              setRoomShapeModalOpen(true, 'presets');
+            }}
             className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer"
             title="Configure Room Walls & Shape"
           >
@@ -639,7 +971,12 @@ export const FloorCanvas: React.FC = () => {
             <span className="hidden sm:inline">Room Shape</span>
           </button>
           <button
-            onClick={() => setRoomShapeModalOpen(true, 'door')}
+            onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              setRoomShapeModalOpen(true, 'door');
+            }}
             className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-amber-700 hover:bg-amber-50 transition-colors cursor-pointer"
             title="Room Doors & Entrances"
           >
@@ -653,7 +990,7 @@ export const FloorCanvas: React.FC = () => {
                 fitRoomToViewport();
               }
             }}
-            className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+            className="hidden sm:flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
             title="Rotate Room 90° Clockwise"
           >
             <RotateCw className="w-3.5 h-3.5 text-blue-600" />
@@ -666,7 +1003,7 @@ export const FloorCanvas: React.FC = () => {
                 fitRoomToViewport();
               }
             }}
-            className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+            className="hidden sm:flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
             title="Mirror Horizontally (Flip Left ↔ Right)"
           >
             <FlipHorizontal className="w-3.5 h-3.5 text-blue-600" />
@@ -679,7 +1016,7 @@ export const FloorCanvas: React.FC = () => {
                 fitRoomToViewport();
               }
             }}
-            className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+            className="hidden sm:flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
             title="Mirror Vertically (Flip Top ↕ Bottom)"
           >
             <FlipVertical className="w-3.5 h-3.5 text-blue-600" />
@@ -716,9 +1053,20 @@ export const FloorCanvas: React.FC = () => {
           <button
             onClick={fitRoomToViewport}
             className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer"
-            title="Reset Room Framing"
+            title="Recenter & Fit Room View"
           >
-            <Maximize2 className="w-4 h-4" />
+            <Focus className="w-4 h-4" />
+          </button>
+          <button
+            onClick={toggleBrowserFullscreen}
+            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer"
+            title={isBrowserFullscreen ? "Exit Fullscreen (F11 / Esc)" : "Fullscreen Canvas (F11)"}
+          >
+            {isBrowserFullscreen ? (
+              <Minimize2 className="w-4 h-4 text-blue-600" />
+            ) : (
+              <Maximize2 className="w-4 h-4 text-slate-500" />
+            )}
           </button>
         </div>
       )}
@@ -727,41 +1075,159 @@ export const FloorCanvas: React.FC = () => {
       {selectedFurnitureId && appMode === 'edit' && (() => {
         const selectedFurn = furnitureList.find((f) => f.id === selectedFurnitureId);
         if (!selectedFurn) return null;
-        const furnW = selectedFurn.dimension.width;
-        const furnL = selectedFurn.dimension.length;
+        const furnW = (resizeLiveDim && resizeLiveDim.id === selectedFurn.id) ? resizeLiveDim.w : selectedFurn.dimension.width;
+        const furnL = (resizeLiveDim && resizeLiveDim.id === selectedFurn.id) ? resizeLiveDim.l : selectedFurn.dimension.length;
         const furnRot = selectedFurn.position.rotation || 0;
         return (
           <div
             data-toolbar="furniture-controls"
             onMouseDown={(e) => e.stopPropagation()}
+            onMouseUp={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
+            onTouchMove={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onPointerUp={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
-            className="absolute bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-white/95 backdrop-blur-md px-3.5 py-1.5 rounded-2xl border border-slate-200 shadow-xl text-slate-800 animate-in fade-in slide-in-from-bottom-2 duration-150"
+            className="fixed bottom-[calc(max(env(safe-area-inset-bottom),8px)+84px)] md:bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5 sm:gap-2 bg-white/95 backdrop-blur-md px-3 sm:px-4 py-1.5 sm:py-2 rounded-2xl border border-slate-200 shadow-2xl text-slate-800 animate-in fade-in slide-in-from-bottom-2 duration-150 w-[calc(100vw-24px)] sm:w-auto max-w-[96vw] flex-wrap justify-center sm:flex-nowrap"
           >
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-bold text-slate-900 truncate max-w-[120px]">
-                {selectedFurn.name}
-              </span>
-              <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">
-                {furnW}m × {furnL}m
-              </span>
-            </div>
-            <div className="w-px h-4 bg-slate-200" />
+            {/* Furniture Name */}
+            <span className="text-xs font-bold text-slate-900 truncate max-w-[120px] sm:max-w-xs flex-shrink-0">
+              {selectedFurn.name}
+            </span>
+
+            <div className="hidden sm:block w-px h-4 bg-slate-200 flex-shrink-0" />
+
+            {/* Rotate 90° */}
             <button
               onClick={rotateSelectedFurniture}
-              className="flex items-center gap-1 text-xs px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold cursor-pointer transition-colors active:scale-95"
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onTouchEnd={(e) => e.stopPropagation()}
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold cursor-pointer transition-colors active:scale-95 flex-shrink-0"
               title="Rotate 90° Clockwise"
             >
               <RotateCw className="w-3.5 h-3.5 text-blue-600" />
-              <span>Rotate ({furnRot}°)</span>
+              <span>Rotate</span>
             </button>
+
+            {/* Flip / Mirror ↔ */}
+            <button
+              onClick={flipSelectedFurniture}
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onTouchEnd={(e) => e.stopPropagation()}
+              className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 ${
+                selectedFurn.mirrored
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+              } rounded-xl font-bold cursor-pointer transition-colors active:scale-95 flex-shrink-0`}
+              title="Mirror / Flip Orientation (e.g. switch chaise lounge left ↔ right)"
+            >
+              <FlipHorizontal className={`w-3.5 h-3.5 ${selectedFurn.mirrored ? 'text-white' : 'text-indigo-600'}`} />
+              <span>Flip</span>
+            </button>
+
+            <div className="w-px h-4 bg-slate-200 flex-shrink-0 hidden xs:block" />
+
+            {/* Quick Dimension Controls (Width x Length) */}
+            <div className="flex items-center gap-1.5 bg-slate-100/90 px-2 py-1 rounded-xl flex-shrink-0">
+              <span className="text-[10px] uppercase font-black tracking-wider text-slate-600 hidden sm:inline">Size:</span>
+              
+              {/* Width steppers */}
+              <div className="flex items-center gap-0.5">
+                <span className="text-[10px] font-bold text-slate-600">W</span>
+                <button
+                  onClick={(e) => adjustFurnitureDimension('w', -0.1, e)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className="w-5 h-5 flex items-center justify-center rounded bg-white hover:bg-slate-200 text-slate-700 shadow-2xs font-bold text-xs active:scale-90"
+                  title="Decrease Width (-10cm)"
+                >
+                  <Minus className="w-2.5 h-2.5" />
+                </button>
+                <span className="font-mono text-xs font-black text-slate-800 px-1 min-w-[20px] text-center">
+                  {furnW}m
+                </span>
+                <button
+                  onClick={(e) => adjustFurnitureDimension('w', 0.1, e)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className="w-5 h-5 flex items-center justify-center rounded bg-white hover:bg-slate-200 text-slate-700 shadow-2xs font-bold text-xs active:scale-90"
+                  title="Increase Width (+10cm)"
+                >
+                  <Plus className="w-2.5 h-2.5" />
+                </button>
+              </div>
+
+              <span className="text-slate-300 font-bold">×</span>
+
+              {/* Length steppers */}
+              <div className="flex items-center gap-0.5">
+                <span className="text-[10px] font-bold text-slate-600">L</span>
+                <button
+                  onClick={(e) => adjustFurnitureDimension('l', -0.1, e)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className="w-5 h-5 flex items-center justify-center rounded bg-white hover:bg-slate-200 text-slate-700 shadow-2xs font-bold text-xs active:scale-90"
+                  title="Decrease Length (-10cm)"
+                >
+                  <Minus className="w-2.5 h-2.5" />
+                </button>
+                <span className="font-mono text-xs font-black text-slate-800 px-1 min-w-[20px] text-center">
+                  {furnL}m
+                </span>
+                <button
+                  onClick={(e) => adjustFurnitureDimension('l', 0.1, e)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className="w-5 h-5 flex items-center justify-center rounded bg-white hover:bg-slate-200 text-slate-700 shadow-2xs font-bold text-xs active:scale-90"
+                  title="Increase Length (+10cm)"
+                >
+                  <Plus className="w-2.5 h-2.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Manage Drawers & Items */}
+            <button
+              onClick={() => {
+                setAppMode('view');
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onTouchEnd={(e) => e.stopPropagation()}
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl font-bold cursor-pointer transition-colors active:scale-95 flex-shrink-0"
+              title="Open & Manage Drawers, Containers and Items inside this furniture"
+            >
+              <FolderOpen className="w-3.5 h-3.5 text-blue-600" />
+              <span>Manage</span>
+            </button>
+
+            {/* Delete Furniture */}
             <button
               onClick={deleteSelectedFurniture}
-              className="flex items-center gap-1 text-xs px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl font-bold cursor-pointer transition-colors active:scale-95"
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onTouchEnd={(e) => e.stopPropagation()}
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl font-bold cursor-pointer transition-colors active:scale-95 flex-shrink-0"
               title="Delete Furniture"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              <span>Delete</span>
+              <span className="hidden sm:inline">Delete</span>
+            </button>
+
+            {/* Deselect */}
+            <button
+              onClick={() => setSelectedFurnitureId(null)}
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onTouchEnd={(e) => e.stopPropagation()}
+              className="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-xl cursor-pointer transition-colors flex-shrink-0"
+              title="Deselect Furniture"
+            >
+              <X className="w-3.5 h-3.5" />
             </button>
           </div>
         );
@@ -994,45 +1460,9 @@ export const FloorCanvas: React.FC = () => {
                   </g>
                 </g>
 
-                {/* Wall Segment Measurements for Non-Rectangular / Polygon Rooms */}
-                {room?.polygonPoints && room.polygonPoints.length > 0 && (() => {
-                  const segments = getRoomWallSegments(room);
-                  return segments.map((seg, idx) => {
-                    const midX = ((seg.p1.x + seg.p2.x) / 2) * unitSize;
-                    const midY = ((seg.p1.y + seg.p2.y) / 2) * unitSize;
-                    const dx = seg.p2.x - seg.p1.x;
-                    const dy = seg.p2.y - seg.p1.y;
-                    const len = Math.hypot(dx, dy);
-                    if (len === 0) return null;
-                    // Normal vector pointing outward
-                    const nx = -dy / len;
-                    const ny = dx / len;
-                    const badgeX = midX + nx * 18;
-                    const badgeY = midY + ny * 18;
-
-                    return (
-                      <g key={`seg-dim-${idx}`} transform={`translate(${badgeX}, ${badgeY})`}>
-                        <rect x={-18} y={-8} width={36} height={16} rx={4} fill="#ffffff" stroke="#cbd5e1" strokeWidth="1" />
-                        <text x={0} y={3.5} textAnchor="middle" fill="#1e293b" fontSize="9" fontFamily="ui-monospace, monospace" fontWeight="bold">
-                          {seg.length}m
-                        </text>
-                      </g>
-                    );
-                  });
-                })()}
               </g>
             )}
           </svg>
-
-          {/* Room Dimensions & Area Watermark Badge */}
-          {showDimensions && (
-            <div className="absolute top-2.5 left-2.5 pointer-events-none z-10 flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white/90 backdrop-blur-xs border border-slate-200/80 shadow-xs text-[10px] font-mono font-bold text-slate-700">
-              <span className="text-blue-600 font-extrabold">{room?.name}</span>
-              <span>•</span>
-              <span>{gridW}m × {gridH}m</span>
-              <span className="text-slate-400">({gridW * gridH} m²)</span>
-            </div>
-          )}
 
           {/* Interactive Door Drag & Quick Edit Badges for All Doors (Edit Mode) */}
           {doorsWithGeo.map(({ door, geo }) => {
@@ -1043,10 +1473,10 @@ export const FloorCanvas: React.FC = () => {
                 style={{
                   left: `${geo.badgePos.x}px`,
                   top: `${geo.badgePos.y}px`,
-                  transform: 'translate(-50%, -50%)',
+                  transform: `translate(-50%, -50%) scale(${1 / zoom})`, // constant on-screen size
                 }}
                 className={`absolute z-35 flex items-center select-none ${
-                  appMode === 'edit' ? 'pointer-events-auto opacity-100 scale-100' : 'pointer-events-none opacity-0 scale-90'
+                  appMode === 'edit' ? 'pointer-events-auto opacity-100 scale-100' : 'invisible pointer-events-none opacity-0 scale-90'
                 } transition-all duration-150`}
               >
                 <div className="relative flex items-center gap-1 bg-slate-900/90 text-white backdrop-blur-md px-2 py-1 rounded-full shadow-2xl border border-white/20 text-xs font-bold ring-2 ring-amber-400/40">
@@ -1056,18 +1486,6 @@ export const FloorCanvas: React.FC = () => {
                       {door.offset}m along {door.wall} wall
                     </div>
                   )}
-
-                  {/* Nudge backward along wall */}
-                  <button
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      if (room) await nudgeDoor(room.id, -1, door.id);
-                    }}
-                    className="w-5 h-5 rounded-full hover:bg-white/20 flex items-center justify-center transition-colors cursor-pointer text-slate-300 hover:text-white"
-                    title="Nudge door backward along wall"
-                  >
-                    ‹
-                  </button>
 
                   {/* Door Drag Handle / Open Modal Tab */}
                   <div
@@ -1086,19 +1504,105 @@ export const FloorCanvas: React.FC = () => {
                     <span className="text-[11px] whitespace-nowrap font-bold">{door.label || 'Door'}</span>
                   </div>
 
-                  {/* Nudge forward along wall */}
-                  <button
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      if (room) await nudgeDoor(room.id, 1, door.id);
-                    }}
-                    className="w-5 h-5 rounded-full hover:bg-white/20 flex items-center justify-center transition-colors cursor-pointer text-slate-300 hover:text-white"
-                    title="Nudge door forward along wall"
-                  >
-                    ›
-                  </button>
+                  {/* Door Connection to Another Room */}
+                  {door.targetRoomId ? (() => {
+                    const targetRoom = allRooms.find((r) => r.id === door.targetRoomId);
+                    return (
+                      <button
+                        type="button"
+                        data-door-connect={door.id || 'door-connect'}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (room) setConnectRoomModalOpen(true, { roomId: room.id, doorId: door.id || '' });
+                        }}
+                        className="w-5 h-5 rounded-full bg-emerald-500/30 hover:bg-emerald-500/50 border border-emerald-400/40 flex items-center justify-center cursor-pointer transition-all active:scale-95 ml-0.5 flex-shrink-0"
+                        title={`Connected to ${targetRoom?.name || 'Room'} — Click to edit or disconnect`}
+                      >
+                        <Link className="w-2.5 h-2.5 text-emerald-300" />
+                      </button>
+                    );
+                  })() : (
+                    <button
+                      type="button"
+                      data-door-connect={door.id || 'door-connect'}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (room) setConnectRoomModalOpen(true, { roomId: room.id, doorId: door.id || '' });
+                      }}
+                      className="w-5 h-5 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center transition-all active:scale-95 shadow-md cursor-pointer ml-0.5 flex-shrink-0"
+                      title="Connect another room to this doorway (+)"
+                    >
+                      <Plus className="w-3 h-3 stroke-[3]" />
+                    </button>
+                  )}
                 </div>
               </div>
+            );
+          })}
+
+          {/* Interactive Doorway Walkthrough Portals (View Mode - positioned OUTSIDE room surface) */}
+          {doorsWithGeo.map(({ door, geo }) => {
+            if (!door.targetRoomId) return null;
+            const targetRoom = allRooms.find((r) => r.id === door.targetRoomId);
+            if (!targetRoom) return null;
+
+            const portalPos = portalPositions.get(door.id || '') || geo.exteriorPortalPos || geo.badgePos;
+            const threshMidX = (geo.thresholdLine.x1 + geo.thresholdLine.x2) / 2;
+            const threshMidY = (geo.thresholdLine.y1 + geo.thresholdLine.y2) / 2;
+
+            return (
+              <React.Fragment key={`view-portal-group-${door.id}`}>
+                {/* Visual architectural connector line from door opening to exterior portal */}
+                {appMode === 'view' && (
+                  <svg
+                    className="absolute inset-0 pointer-events-none overflow-visible z-30"
+                    style={{ overflow: 'visible' }}
+                  >
+                    <line
+                      x1={threshMidX}
+                      y1={threshMidY}
+                      x2={portalPos.x}
+                      y2={portalPos.y}
+                      stroke="#10b981"
+                      strokeWidth="2"
+                      strokeDasharray="3 3"
+                      strokeOpacity="0.85"
+                    />
+                    <circle
+                      cx={threshMidX}
+                      cy={threshMidY}
+                      r="3"
+                      fill="#10b981"
+                    />
+                  </svg>
+                )}
+
+                <div
+                  style={{
+                    left: `${portalPos.x}px`,
+                    top: `${portalPos.y}px`,
+                    transform: `translate(-50%, -50%) scale(${1 / zoom})`, // constant on-screen size
+                  }}
+                  className={`absolute z-35 flex items-center select-none ${
+                    appMode === 'view' ? 'pointer-events-auto opacity-100 scale-100' : 'invisible pointer-events-none opacity-0 scale-90'
+                  } transition-all duration-150`}
+                >
+                  <button
+                    type="button"
+                    data-door-portal={door.id || 'door-portal'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedRoomId(door.targetRoomId!);
+                    }}
+                    className="group flex items-center gap-1.5 bg-slate-900/95 hover:bg-emerald-600 text-white backdrop-blur-md px-3 py-1.5 rounded-full shadow-2xl border border-white/20 text-xs font-bold ring-2 ring-emerald-400/80 hover:ring-emerald-300 transition-all cursor-pointer active:scale-95"
+                    title={`Walk through door into ${targetRoom.name}`}
+                  >
+                    <DoorOpen className="w-3.5 h-3.5 text-emerald-400 group-hover:text-white transition-colors" />
+                    <span className="whitespace-nowrap max-w-[160px] truncate">{targetRoom.name}</span>
+                    <ArrowRight className="w-3 h-3 text-emerald-300 group-hover:text-white group-hover:translate-x-0.5 transition-transform" />
+                  </button>
+                </div>
+              </React.Fragment>
             );
           })}
 
@@ -1138,18 +1642,20 @@ export const FloorCanvas: React.FC = () => {
                   isCurrentlyDragging ? 'transition-none z-35 shadow-2xl scale-[1.02] ring-4 ring-blue-500 rounded-2xl' : 'transition-all duration-150'
                 } ${
                   appMode === 'edit' ? 'cursor-move' : 'cursor-pointer hover:scale-[1.02] active:scale-[0.98]'
-                } ${isSelected ? 'z-20 ring-2 ring-blue-600 rounded-2xl' : isSearchMatch ? 'z-25 scale-[1.02]' : 'z-10'} ${
+                } ${isSelected && furn.shape !== 'l_shape' && furn.shape !== 'round' ? 'z-20 ring-2 ring-blue-600 rounded-2xl' : isSelected ? 'z-20' : isSearchMatch ? 'z-25 scale-[1.02]' : 'z-10'} ${
                   isSearchDimmed ? 'opacity-30 grayscale-[35%]' : 'opacity-100'
                 }`}
               >
                 {/* Rich Top-Down Architectural Furniture Graphic */}
                 <FurnitureGraphic
                   type={furn.type}
+                  shape={furn.shape}
                   name={furn.name}
                   color={furn.color}
                   width={w}
                   height={l}
                   rotation={furn.position.rotation}
+                  mirrored={furn.mirrored}
                   itemCount={itemCount}
                   isSelected={isSelected}
                   isHighlighted={isHighlighted || isSearchMatch}
@@ -1160,8 +1666,9 @@ export const FloorCanvas: React.FC = () => {
 
                 {/* Live Resizing Dimension Tooltip */}
                 {resizeLiveDim && resizeLiveDim.id === furn.id && (
-                  <div className="absolute -top-7 left-1/2 -translate-x-1/2 z-40 bg-blue-600 text-white font-mono text-[10px] font-black px-2 py-0.5 rounded-md shadow-lg pointer-events-none whitespace-nowrap animate-pulse">
-                    {dimW}m × {dimL}m
+                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 z-40 bg-blue-600 text-white font-mono text-[11px] font-black px-2.5 py-1 rounded-lg shadow-xl pointer-events-none whitespace-nowrap ring-2 ring-white flex items-center gap-1.5 animate-pulse">
+                    <span>📐</span>
+                    <span>{dimW}m × {dimL}m</span>
                   </div>
                 )}
 
@@ -1182,38 +1689,49 @@ export const FloorCanvas: React.FC = () => {
                   <span className="absolute -inset-2.5 rounded-xl bg-amber-400/60 animate-ping pointer-events-none" />
                 )}
 
-                {/* Bottom-Right Resize Handle (Visible ONLY in Edit Mode) */}
-                {appMode === 'edit' && (
-                  <div
-                    onMouseDown={(e) => {
-                      e.stopPropagation();
-                      setSelectedFurnitureId(furn.id);
-                      setResizingFurnitureId(furn.id);
-                      setResizeStart({
-                        mouseX: e.clientX,
-                        mouseY: e.clientY,
-                        origW: furn.dimension.width,
-                        origL: furn.dimension.length,
-                      });
-                    }}
-                    onTouchStart={(e) => {
-                      e.stopPropagation();
-                      setSelectedFurnitureId(furn.id);
-                      if (e.touches[0]) {
-                        setResizingFurnitureId(furn.id);
-                        setResizeStart({
-                          mouseX: e.touches[0].clientX,
-                          mouseY: e.touches[0].clientY,
-                          origW: furn.dimension.width,
-                          origL: furn.dimension.length,
-                        });
-                      }
-                    }}
-                    className="absolute bottom-1 right-1 w-5 h-5 rounded-md bg-white text-slate-800 shadow-md flex items-center justify-center cursor-se-resize z-30 transition-transform active:scale-125 border border-slate-300"
-                    title="Drag to resize dimensions"
-                  >
-                    <Sliders className="w-3 h-3 text-blue-600" />
-                  </div>
+                {/* Resize Handles (Prominently visible when item is selected in Edit Mode) */}
+                {appMode === 'edit' && isSelected && (
+                  <>
+                    {/* Bottom-Right Corner Resize Handle (Dual-axis resize) */}
+                    <div
+                      data-resize-handle="corner"
+                      onMouseDown={(e) => startResizing(e, furn.id, 'corner')}
+                      onTouchStart={(e) => startResizing(e, furn.id, 'corner')}
+                      style={{ touchAction: 'none' }}
+                      className="absolute -bottom-2.5 -right-2.5 w-7 h-7 rounded-xl bg-blue-600 hover:bg-blue-700 text-white shadow-xl flex items-center justify-center cursor-se-resize z-40 border-2 border-white ring-2 ring-blue-500/40 transition-transform active:scale-125 before:absolute before:-inset-3 before:content-[''] select-none"
+                      title="Drag corner to resize dimensions"
+                    >
+                      <ArrowDownRight className="w-4 h-4 stroke-[2.5]" />
+                    </div>
+
+                    {/* Right Edge Resize Handle (Horizontal width resize - if piece is wide enough) */}
+                    {w >= 64 && (
+                      <div
+                        data-resize-handle="width"
+                        onMouseDown={(e) => startResizing(e, furn.id, 'width')}
+                        onTouchStart={(e) => startResizing(e, furn.id, 'width')}
+                        style={{ touchAction: 'none' }}
+                        className="absolute top-1/2 -right-1.5 -translate-y-1/2 w-3 h-8 rounded-full bg-white hover:bg-blue-50 text-blue-600 shadow-md flex items-center justify-center cursor-ew-resize z-35 border-2 border-blue-500 transition-transform active:scale-125 before:absolute before:-inset-2 before:content-[''] select-none"
+                        title="Drag edge to resize horizontal dimension"
+                      >
+                        <div className="w-0.5 h-3 bg-blue-500 rounded-full" />
+                      </div>
+                    )}
+
+                    {/* Bottom Edge Resize Handle (Vertical length resize - if piece is tall enough) */}
+                    {l >= 64 && (
+                      <div
+                        data-resize-handle="length"
+                        onMouseDown={(e) => startResizing(e, furn.id, 'length')}
+                        onTouchStart={(e) => startResizing(e, furn.id, 'length')}
+                        style={{ touchAction: 'none' }}
+                        className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-8 h-3 rounded-full bg-white hover:bg-blue-50 text-blue-600 shadow-md flex items-center justify-center cursor-ns-resize z-35 border-2 border-blue-500 transition-transform active:scale-125 before:absolute before:-inset-2 before:content-[''] select-none"
+                        title="Drag edge to resize vertical dimension"
+                      >
+                        <div className="w-3 h-0.5 bg-blue-500 rounded-full" />
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             );

@@ -52,6 +52,21 @@ switch ($route) {
         handleSchema();
         break;
 
+    case 'v1/auth/google':
+    case 'auth/google':
+        require_once __DIR__ . '/auth/google.php';
+        break;
+
+    case 'v1/auth/me':
+    case 'auth/me':
+        require_once __DIR__ . '/auth/me.php';
+        break;
+
+    case 'v1/auth/logout':
+    case 'auth/logout':
+        require_once __DIR__ . '/auth/logout.php';
+        break;
+
     case 'health':
     case 'v1/health':
     case 'status':

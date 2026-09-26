@@ -21,6 +21,8 @@ export type RoomDoor = {
   offset: number; // grid units from start of wall segment
   swing?: DoorSwing;
   width?: number; // default: 2 grid units
+  targetRoomId?: string; // Connected room ID
+  targetDoorId?: string; // Connected door ID in the target room
 };
 
 export type RoomShapeType = 
@@ -74,19 +76,26 @@ export type FurnitureType =
   | 'sofa'
   | 'workbench'
   | 'box_stack'
+  | 'kitchen_counter'
+  | 'kitchen_island'
+  | 'appliance'
   | 'other';
+
+export type FurnitureShape = 'rectangle' | 'round' | 'l_shape' | 'zone';
 
 export type Furniture = {
   id: string;
   roomId: string;
   name: string;
   type: FurnitureType;
+  shape?: FurnitureShape;
   position: Position;
   dimension: Dimension;
   color: string;
   icon?: string;
   notes?: string;
   photoDataUrl?: string;
+  mirrored?: boolean; // Flip/mirror orientation for asymmetrical furniture (e.g. L-shaped couches, corner desks)
   facadeLayout?: 'horizontal_row' | 'grid' | 'vertical_stack';
   columns?: number;
   createdAt: number;

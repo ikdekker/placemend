@@ -4,6 +4,9 @@ import './index.css'
 import App from './App.tsx'
 import { useAppStore } from './store/useAppStore'
 import { db } from './db/database'
+import { installGlobalErrorReporting } from './services/errorReport'
+
+installGlobalErrorReporting()
 
 if (typeof window !== 'undefined') {
   (window as any).__STORE__ = useAppStore;

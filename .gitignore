@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local-only: scratch scripts, agent config, and the handoff doc (contains account identifiers)
+scratch/
+.claude/
+PROJECT_HANDOFF.md

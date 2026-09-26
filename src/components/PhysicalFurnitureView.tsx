@@ -24,8 +24,11 @@ import {
   ChevronLeft,
   ChevronUp,
   ChevronDown,
-  Check
+  Check,
+  Sparkles,
 } from 'lucide-react';
+import { ScanItemsModal } from './ScanItemsModal';
+import { effectiveContainerType, isOpenKind } from '../utils/containerKind';
 
 function cleanContainerName(name: string): string {
   return name.replace(/\s*\(.*?\)\s*/g, '').trim();
@@ -44,6 +47,7 @@ export const PhysicalFurnitureView: React.FC = () => {
   const [showAllItems, setShowAllItems] = useState(false);
   const [viewMode, setViewMode] = useState<'model' | 'photo'>('model');
   const [isComposing, setIsComposing] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
   const [addingToCol, setAddingToCol] = useState<number | null>(null);
   const [newSlotName, setNewSlotName] = useState('');
   const [newSlotType, setNewSlotType] = useState<Container['type']>('drawer');
@@ -260,8 +264,108 @@ export const PhysicalFurnitureView: React.FC = () => {
     }
   };
 
+  // --- Facade layout: surfaces become the top slab; the rest is drawn by what it really is ---
+  const containerTotal = (container: Container) =>
+    (itemCountMap.get(container.id) || 0) +
+    containers.filter((c) => c.parentContainerId === container.id).reduce((acc, c) => acc + (itemCountMap.get(c.id) || 0), 0);
+
+  const facadeTop = topLevelContainers
+    .filter((c) => effectiveContainerType(c) === 'top_surface')
+    .sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+  const facadeBodyAll = topLevelContainers.filter((c) => effectiveContainerType(c) !== 'top_surface');
+  // Without an explicit column setting, don't spread one lower shelf over three empty columns
+  const facadeNumColumns = Math.max(1, Math.min(4, furniture.columns || Math.min(3, facadeBodyAll.length || 1)));
+  const facadeColumns: Container[][] = Array.from({ length: facadeNumColumns }, () => []);
+  facadeBodyAll.forEach((container, idx) => {
+    let colIdx = container.columnIndex;
+    if (colIdx === undefined || colIdx < 0 || colIdx >= facadeNumColumns) colIdx = idx % facadeNumColumns;
+    facadeColumns[colIdx].push(container);
+  });
+  facadeColumns.forEach((col) => col.sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0)));
+  const facadeBody = facadeBodyAll;
+  const facadeIsOpen = facadeBody.every((c) => isOpenKind(effectiveContainerType(c)));
+
+  const renderSlot = (container: Container, stackSize: number, openFrame: boolean) => {
+    const kind = effectiveContainerType(container);
+    const totalCount = containerTotal(container);
+    const isMatch = isSearching && matchingContainerIds.has(container.id);
+    const isDimmed = isSearching && !isMatch;
+    const matchCount = matchCountsByContainer.get(container.id) || 0;
+    const color = furniture.color || '#0f766e';
+    const minHeightClass = stackSize === 1
+      ? (openFrame ? 'min-h-[120px] sm:min-h-[150px]' : 'min-h-[180px] sm:min-h-[220px]')
+      : stackSize === 2 ? 'min-h-[110px] sm:min-h-[140px]' : 'min-h-[92px] sm:min-h-[112px]';
+
+    const frontClass = isMatch
+      ? 'ring-4 ring-amber-400 bg-amber-50/95 border-2 border-amber-400 shadow-xl shadow-amber-300/50 z-10'
+      : kind === 'drawer'
+      ? 'bg-gradient-to-b from-white via-slate-50 to-slate-100 border-2 border-slate-300 hover:border-blue-500 shadow-md'
+      : kind === 'cabinet_door'
+      ? 'bg-gradient-to-br from-white to-slate-100 border-2 border-slate-300 hover:border-blue-500 shadow-md'
+      : kind === 'box' || kind === 'bin'
+      ? 'bg-gradient-to-b from-amber-50 via-amber-100/60 to-amber-100/90 border-2 border-amber-300 hover:border-amber-500 shadow-md'
+      : openFrame
+      ? 'bg-transparent hover:bg-white/50'
+      : 'bg-slate-50/70 border-2 border-slate-200 hover:border-emerald-500 shadow-inner';
+
+    return (
+      <div
+        key={container.id}
+        onClick={() => setSelectedContainerId(container.id)}
+        className={`flex-1 relative ${openFrame ? 'rounded-none' : 'rounded-2xl sm:rounded-3xl'} p-3 sm:p-4 ${
+          openFrame || kind === 'shelf' ? 'pb-5 sm:pb-6' : ''
+        } flex flex-col justify-between items-center text-center cursor-pointer transition-all duration-200 group active:scale-98 select-none ${minHeightClass} ${frontClass} ${
+          isDimmed ? 'opacity-30 grayscale-[30%]' : 'opacity-100'
+        }`}
+        title={container.name}
+      >
+        {/* Count / match pip */}
+        <div className="w-full flex items-center justify-end pointer-events-none">
+          {isMatch ? (
+            <span className="min-w-[32px] h-7 px-2.5 rounded-full bg-amber-500 text-white font-black text-xs sm:text-sm shadow-md flex items-center justify-center gap-1 animate-pulse">
+              ⚡ {matchCount}
+            </span>
+          ) : totalCount > 0 ? (
+            <span className="min-w-[28px] h-7 px-2.5 rounded-full bg-slate-900 text-white font-mono text-xs sm:text-sm font-black shadow-md flex items-center justify-center">
+              {totalCount}
+            </span>
+          ) : (
+            <span className="h-7" />
+          )}
+        </div>
+
+        {/* What it is: handle for fronts, rail for hanging, nothing for open shelves */}
+        <div className="my-auto py-2 flex items-center justify-center pointer-events-none w-full">
+          {kind === 'drawer' ? (
+            <div className="w-16 sm:w-24 h-3.5 sm:h-4 rounded-full shadow-md border-2 bg-gradient-to-r from-slate-300 via-white to-slate-300 border-slate-400/60 group-hover:border-blue-400" />
+          ) : kind === 'cabinet_door' ? (
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 w-2.5 h-12 sm:h-16 rounded-full shadow-md border-2 bg-gradient-to-b from-slate-300 via-white to-slate-300 border-slate-400/60 group-hover:border-blue-400" />
+          ) : kind === 'box' || kind === 'bin' ? (
+            <div className="w-12 sm:w-16 h-3 sm:h-3.5 rounded-md bg-amber-800/40 shadow-xs border border-amber-900/20" />
+          ) : kind === 'hanging_rod' ? (
+            <div className="absolute left-3 right-3 top-3 h-1.5 rounded-full bg-slate-400" />
+          ) : null}
+        </div>
+
+        {/* Label: always visible, so you know what you are opening */}
+        <span className="w-full text-[11px] sm:text-xs font-bold text-slate-600 truncate pointer-events-none">
+          {cleanContainerName(container.name)}
+        </span>
+
+        {/* Shelves are planks: draw the board they stand on */}
+        {(openFrame || kind === 'shelf') && (
+          <div
+            style={{ backgroundColor: color }}
+            className="absolute left-0 right-0 bottom-0 h-2.5 sm:h-3 rounded-sm shadow-md pointer-events-none"
+          />
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="flex-1 min-h-0 w-full bg-slate-100 flex flex-col overflow-hidden animate-in fade-in duration-150">
+      {isScanning && <ScanItemsModal furnitureId={furniture.id} onClose={() => setIsScanning(false)} />}
       <input
         ref={photoInputRef}
         type="file"
@@ -272,8 +376,8 @@ export const PhysicalFurnitureView: React.FC = () => {
       />
 
       {/* Top Header Bar */}
-      <div className="bg-white border-b border-slate-200 px-3.5 sm:px-5 py-3 sm:py-3.5 flex items-center justify-between shadow-xs flex-shrink-0 gap-2">
-        <div className="flex items-center gap-2.5 min-w-0">
+      <div className="bg-white border-b border-slate-200 px-3.5 sm:px-5 py-3 sm:py-3.5 flex flex-wrap items-center justify-between shadow-xs flex-shrink-0 gap-2">
+        <div className="flex items-center gap-2.5 min-w-0 flex-1 basis-[60%] sm:basis-auto">
           <button
             data-action="back-to-room"
             onClick={() => setSelectedFurnitureId(null)}
@@ -297,6 +401,15 @@ export const PhysicalFurnitureView: React.FC = () => {
         {/* Header Actions: Compose Layout, Photo, & All Items */}
         <div className="flex items-center gap-2 flex-shrink-0">
           <button
+            onClick={() => setIsScanning(true)}
+            className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-bold transition-all cursor-pointer shadow-xs min-h-[42px]"
+            title="Scan a photo to add the items inside"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span className="hidden sm:inline">Scan</span>
+          </button>
+
+          <button
             onClick={() => {
               setIsComposing(!isComposing);
               if (showAllItems) setShowAllItems(false);
@@ -309,7 +422,7 @@ export const PhysicalFurnitureView: React.FC = () => {
             title="Configure drawer layout and composition"
           >
             <Sliders className="w-4 h-4" />
-            <span>{isComposing ? 'Done' : 'Layout'}</span>
+            <span className={isComposing ? '' : 'hidden sm:inline'}>{isComposing ? 'Done' : 'Layout'}</span>
           </button>
 
           {furniture.photoDataUrl ? (
@@ -719,147 +832,100 @@ export const PhysicalFurnitureView: React.FC = () => {
           /* PURE VISUAL SEMI-3D FURNITURE FACADE (ZERO TEXT ON DRAWERS)  */
           /* ============================================================ */
           <div className="w-full max-w-2xl flex flex-col items-center gap-4 sm:gap-6 px-1 sm:px-2">
-            {/* Realistic Semi-3D Furniture Shell */}
+            {/* Furniture shell: surfaces on top, then an open frame (tables, racks) or a closed cabinet */}
             <div className="w-full flex flex-col items-center">
-              {/* Top Crown / Tabletop Slab (Realistic Bevel & Sheen) */}
-              <div 
-                style={{ backgroundColor: furniture.color || '#0f766e' }}
-                className="w-[99%] h-5 sm:h-6 rounded-t-2xl shadow-sm border-t border-x border-white/40 relative overflow-hidden flex items-center justify-center"
-              >
-                <div className="absolute inset-x-0 top-0 h-[2px] bg-white/50" />
-                <div className="w-20 h-1.5 rounded-full bg-white/20" />
-              </div>
+              {/* Top surfaces (tabletop, countertop) are drawn as the slab itself; otherwise a plain crown */}
+              {facadeTop.length > 0 ? (
+                <div className="w-[99%] flex gap-1.5">
+                  {facadeTop.map((container) => {
+                    const count = containerTotal(container);
+                    const isMatch = isSearching && matchingContainerIds.has(container.id);
+                    const isDimmed = isSearching && !isMatch;
+                    return (
+                      <button
+                        key={container.id}
+                        onClick={() => setSelectedContainerId(container.id)}
+                        style={{ backgroundColor: furniture.color || '#0f766e' }}
+                        className={`flex-1 min-w-0 min-h-[52px] rounded-t-2xl px-3 py-2 flex items-center justify-between gap-2 text-white shadow-md border-t border-x border-white/40 cursor-pointer active:scale-[0.99] transition-all ${
+                          isMatch ? 'ring-4 ring-amber-400' : 'hover:brightness-110'
+                        } ${isDimmed ? 'opacity-40' : ''}`}
+                        title={container.name}
+                      >
+                        <span className="text-xs sm:text-sm font-extrabold truncate">{cleanContainerName(container.name)}</span>
+                        <span className={`min-w-[28px] h-7 px-2 rounded-full font-mono text-xs font-black flex items-center justify-center flex-shrink-0 ${
+                          isMatch ? 'bg-amber-500 text-white' : 'bg-black/25 text-white'
+                        }`}>
+                          {isMatch ? `⚡ ${matchCountsByContainer.get(container.id) || 0}` : count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div
+                  style={{ backgroundColor: furniture.color || '#0f766e' }}
+                  className="w-[99%] h-5 sm:h-6 rounded-t-2xl shadow-sm border-t border-x border-white/40"
+                />
+              )}
 
-              {/* Main Cabinet Frame Housing */}
-              <div
-                style={{
-                  backgroundColor: `${furniture.color || '#0f766e'}1a`,
-                  borderColor: furniture.color || '#0f766e',
-                }}
-                className="w-full rounded-2xl sm:rounded-3xl p-3 sm:p-5 border-4 shadow-2xl relative"
-              >
-                {topLevelContainers.length === 0 ? (
-                  <div className="bg-white/85 rounded-2xl p-8 text-center flex flex-col items-center gap-3">
-                    <Archive className="w-10 h-10 text-slate-300" />
-                    <p className="text-slate-500 font-medium text-sm">
-                      This cupboard doesn't have any drawers or shelves yet.
-                    </p>
-                    <button
-                      onClick={() => setIsComposing(true)}
-                      className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold text-xs sm:text-sm shadow-md min-h-[40px]"
-                    >
-                      Configure Layout
-                    </button>
-                  </div>
-                ) : (
-                  /* Multi-Column Multi-Stack Layout */
-                  <div 
-                    className="grid gap-2.5 sm:gap-4 w-full"
-                    style={{ gridTemplateColumns: `repeat(${numColumns}, minmax(0, 1fr))` }}
+              {topLevelContainers.length === 0 ? (
+                <div className="w-full bg-white/85 rounded-b-3xl p-8 text-center flex flex-col items-center gap-3 border-4 border-t-0 border-slate-200">
+                  <Archive className="w-10 h-10 text-slate-300" />
+                  <p className="text-slate-500 font-medium text-sm">This furniture doesn't have any drawers, shelves or surfaces yet.</p>
+                  <button
+                    onClick={() => setIsComposing(true)}
+                    className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold text-xs sm:text-sm shadow-md min-h-[40px]"
                   >
-                    {columns.map((colContainers, colIdx) => (
-                      <div key={colIdx} className="flex flex-col gap-2.5 sm:gap-3.5 h-full justify-stretch">
-                        {colContainers.length === 0 ? (
-                          <div className="flex-1 min-h-[160px] sm:min-h-[200px] rounded-2xl border-2 border-dashed border-slate-300/60 bg-slate-50/40 flex items-center justify-center p-3 text-slate-300 text-xs font-bold pointer-events-none">
-                            Empty
-                          </div>
-                        ) : (
-                          colContainers.map((container) => {
-                            const directCount = itemCountMap.get(container.id) || 0;
-                            const children = containers.filter((c) => c.parentContainerId === container.id);
-                            const childCount = children.reduce((acc, c) => acc + (itemCountMap.get(c.id) || 0), 0);
-                            const totalCount = directCount + childCount;
-
-                            const isMatch = isSearching && matchingContainerIds.has(container.id);
-                            const isDimmed = isSearching && !isMatch;
-                            const matchCount = matchCountsByContainer.get(container.id) || 0;
-
-                            const isDrawer = container.type === 'drawer';
-                            const isBox = container.type === 'box' || container.type === 'bin';
-
-                            // Substantial height for single drawers, and flex-1 so asymmetric drawers match heights
-                            const minHeightClass = colContainers.length === 1 
-                              ? 'min-h-[180px] sm:min-h-[220px]' 
-                              : colContainers.length === 2 
-                              ? 'min-h-[125px] sm:min-h-[150px]' 
-                              : 'min-h-[100px] sm:min-h-[120px]';
-
-                            /* PURE VISUAL DRAWER FRONT: ZERO TEXT LABELS, BIGGER TACTILE TOUCH TARGET */
-                            return (
-                              <div
-                                key={container.id}
-                                onClick={() => setSelectedContainerId(container.id)}
-                                className={`flex-1 relative rounded-2xl sm:rounded-3xl p-3 sm:p-4 flex flex-col justify-between items-center text-center cursor-pointer transition-all duration-200 group active:scale-98 select-none ${minHeightClass} ${
-                                  isMatch
-                                    ? 'ring-4 ring-amber-400 bg-amber-50/95 border-2 border-amber-400 shadow-xl shadow-amber-300/50 scale-[1.02] z-10'
-                                    : isDrawer
-                                    ? 'bg-gradient-to-b from-white via-slate-50 to-slate-100 border-2 border-slate-300 hover:border-blue-500 shadow-md hover:shadow-xl'
-                                    : isBox
-                                    ? 'bg-gradient-to-b from-amber-50 via-amber-100/60 to-amber-100/90 border-2 border-amber-300 hover:border-amber-500 shadow-md hover:shadow-xl'
-                                    : 'bg-white border-2 border-slate-200 hover:border-emerald-500 shadow-md hover:shadow-xl'
-                                } ${isDimmed ? 'opacity-30 grayscale-[30%]' : 'opacity-100'}`}
-                              >
-                                {/* Top Pip Row: Subtle corner screw + Minimal Count Pip */}
-                                <div className="w-full flex items-center justify-between pointer-events-none">
-                                  <div className={`w-2 h-2 rounded-full transition-colors ${
-                                    isMatch ? 'bg-amber-400' : 'bg-slate-300 group-hover:bg-blue-400'
-                                  }`} />
-                                  {isMatch ? (
-                                    <span className="min-w-[32px] h-7 px-2.5 rounded-full bg-amber-500 text-white font-black text-xs sm:text-sm shadow-md flex items-center justify-center gap-1 animate-pulse">
-                                      <span>⚡</span>
-                                      <span>{matchCount}</span>
-                                    </span>
-                                  ) : totalCount > 0 ? (
-                                    <span className="min-w-[28px] h-7 px-2.5 rounded-full bg-slate-900 text-white font-mono text-xs sm:text-sm font-black shadow-md flex items-center justify-center">
-                                      {totalCount}
-                                    </span>
-                                  ) : (
-                                    <div className="w-2 h-2 rounded-full bg-slate-200" />
-                                  )}
-                                </div>
-
-                                {/* Tactile Center Metallic Pull-Handle (Substantial 3D handle) */}
-                                <div className="my-auto py-3 flex flex-col items-center pointer-events-none">
-                                  {isDrawer ? (
-                                    <div className={`w-16 sm:w-28 h-3.5 sm:h-4 rounded-full transition-all duration-200 shadow-md border-2 ${
-                                      isMatch 
-                                        ? 'bg-gradient-to-r from-amber-400 via-amber-100 to-amber-400 border-amber-500 shadow-amber-300/60' 
-                                        : 'bg-gradient-to-r from-slate-300 via-white to-slate-300 border-slate-400/60 group-hover:from-blue-300 group-hover:via-white group-hover:to-blue-400 group-hover:border-blue-400 shadow-slate-400/30'
-                                    }`}>
-                                      <div className="w-3/4 h-[2px] mx-auto mt-[2px] rounded-full bg-white/70" />
-                                    </div>
-                                  ) : isBox ? (
-                                    <div className="w-12 sm:w-16 h-3 sm:h-3.5 rounded-md bg-amber-800/40 shadow-xs border border-amber-900/20" />
-                                  ) : (
-                                    <div className="w-12 sm:w-16 h-2 rounded-full bg-slate-300" />
-                                  )}
-                                </div>
-
-                                {/* Bottom Accent Screw */}
-                                <div className="w-full flex justify-center pointer-events-none opacity-40">
-                                  <div className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-                                </div>
-                              </div>
-                            );
-                          })
-                        )}
+                    Configure Layout
+                  </button>
+                </div>
+              ) : facadeBody.length === 0 ? (
+                /* Only a surface (plain table): just legs under the top */
+                <div className="w-[96%] flex justify-between pointer-events-none">
+                  <div style={{ backgroundColor: furniture.color || '#0f766e' }} className="w-2.5 sm:w-3 h-20 sm:h-24 rounded-b-md shadow-md" />
+                  <div style={{ backgroundColor: furniture.color || '#0f766e' }} className="w-2.5 sm:w-3 h-20 sm:h-24 rounded-b-md shadow-md" />
+                </div>
+              ) : facadeIsOpen ? (
+                /* Open frame: legs on both sides, shelves as planks you can see onto */
+                <div className="w-full flex items-stretch">
+                  <div style={{ backgroundColor: furniture.color || '#0f766e' }} className="w-2.5 sm:w-3 rounded-b-md shadow-md flex-shrink-0" />
+                  <div
+                    className="flex-1 grid gap-x-2 sm:gap-x-4 px-2 sm:px-4"
+                    style={{ gridTemplateColumns: `repeat(${facadeColumns.length}, minmax(0, 1fr))` }}
+                  >
+                    {facadeColumns.map((col, colIdx) => (
+                      <div key={colIdx} className="flex flex-col">
+                        {col.map((container) => renderSlot(container, col.length, true))}
                       </div>
                     ))}
                   </div>
-                )}
-              </div>
-
-              {/* Realistic Sturdy Furniture Feet */}
-              <div className="w-[94%] flex items-center justify-between px-4 -mt-1 pointer-events-none">
-                <div 
-                  style={{ backgroundColor: furniture.color || '#0f766e' }}
-                  className="w-5 h-3.5 sm:w-6 sm:h-4 rounded-b-md shadow-md opacity-80"
-                />
-                <div 
-                  style={{ backgroundColor: furniture.color || '#0f766e' }}
-                  className="w-5 h-3.5 sm:w-6 sm:h-4 rounded-b-md shadow-md opacity-80"
-                />
-              </div>
+                  <div style={{ backgroundColor: furniture.color || '#0f766e' }} className="w-2.5 sm:w-3 rounded-b-md shadow-md flex-shrink-0" />
+                </div>
+              ) : (
+                /* Closed cabinet housing with fronts per compartment */
+                <>
+                  <div
+                    style={{ backgroundColor: `${furniture.color || '#0f766e'}1a`, borderColor: furniture.color || '#0f766e' }}
+                    className="w-full rounded-b-2xl sm:rounded-b-3xl p-3 sm:p-5 border-4 border-t-0 shadow-2xl relative"
+                  >
+                    <div
+                      className="grid gap-2.5 sm:gap-4 w-full"
+                      style={{ gridTemplateColumns: `repeat(${facadeColumns.length}, minmax(0, 1fr))` }}
+                    >
+                      {facadeColumns.map((col, colIdx) => (
+                        <div key={colIdx} className="flex flex-col gap-2.5 sm:gap-3.5 h-full">
+                          {col.map((container) => renderSlot(container, col.length, false))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Feet */}
+                  <div className="w-[94%] flex items-center justify-between px-4 -mt-1 pointer-events-none">
+                    <div style={{ backgroundColor: furniture.color || '#0f766e' }} className="w-5 h-3.5 sm:w-6 sm:h-4 rounded-b-md shadow-md opacity-80" />
+                    <div style={{ backgroundColor: furniture.color || '#0f766e' }} className="w-5 h-3.5 sm:w-6 sm:h-4 rounded-b-md shadow-md opacity-80" />
+                  </div>
+                </>
+              )}
 
               {/* Ambient Ground Shadow */}
               <div className="w-[90%] h-2.5 bg-slate-900/10 rounded-full blur-xs -mt-1" />

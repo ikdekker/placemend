@@ -6,8 +6,7 @@ import {
   Plus, 
   SlidersHorizontal, 
   Zap,
-  Home,
-  Sparkles
+  Home
 } from 'lucide-react';
 
 export const MobileNav: React.FC = () => {
@@ -16,7 +15,6 @@ export const MobileNav: React.FC = () => {
     setSearchOpen,
     setFurnitureLibraryOpen,
     setRoomManagerOpen,
-    setApiSyncModalOpen,
     selectedFurnitureId,
     setSelectedFurnitureId,
     setSelectedContainerId,
@@ -32,7 +30,7 @@ export const MobileNav: React.FC = () => {
   };
 
   return (
-    <div className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 px-2 py-2 flex items-center justify-between shadow-lg select-none pb-[max(env(safe-area-inset-bottom),8px)]">
+    <div className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 py-2 flex items-center justify-around shadow-lg select-none pb-[max(env(safe-area-inset-bottom),8px)]">
       {/* Search */}
       <button
         onClick={() => setSearchOpen(!isSearchOpen)}
@@ -84,17 +82,7 @@ export const MobileNav: React.FC = () => {
         </div>
         <span className="text-[11px] font-black truncate">Rooms</span>
       </button>
-
-      {/* AI Index */}
-      <button
-        onClick={() => setApiSyncModalOpen(true)}
-        className="flex-1 min-w-0 flex flex-col items-center justify-center gap-1 text-indigo-600 hover:text-indigo-800 transition-colors cursor-pointer py-1 min-h-[52px]"
-      >
-        <div className="p-2 rounded-xl bg-indigo-50 border border-indigo-100">
-          <Sparkles className="w-5 h-5 text-indigo-600 fill-indigo-200" />
-        </div>
-        <span className="text-[11px] font-black truncate">AI Sync</span>
-      </button>
     </div>
   );
 };
+

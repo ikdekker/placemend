@@ -3,20 +3,17 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
 import { useVisualSearch } from '../hooks/useVisualSearch';
+import { scheduleSeedIfEmpty } from '../db/sampleData';
 import { 
   Search, 
   MapPin, 
-  Download, 
-  Plus, 
-  Maximize2, 
   Eye, 
   Edit3, 
-  Pentagon,
   X,
   Zap,
-  Sparkles,
   SlidersHorizontal,
-  Ruler
+  User,
+  LayoutGrid
 } from 'lucide-react';
 
 export const Header: React.FC = () => {
@@ -31,15 +28,11 @@ export const Header: React.FC = () => {
     searchQuery,
     setSearchQuery,
     clearSearch,
-    setRoomShapeModalOpen,
     setRoomManagerOpen,
-    setFurnitureLibraryOpen,
-    setBackupModalOpen,
-    setApiSyncModalOpen,
-    resetView,
+    setMultiRoomOverviewOpen,
+    currentUser,
+    setAccountModalOpen,
     setSelectedFurnitureId,
-    showDimensions,
-    toggleShowDimensions,
   } = useAppStore();
 
   const { isSearching, totalMatches } = useVisualSearch();
@@ -47,10 +40,24 @@ export const Header: React.FC = () => {
 
   const rooms = useLiveQuery(async () => {
     if (selectedLocationId) {
-      return await db.rooms.where('locationId').equals(selectedLocationId).toArray();
+      const locRooms = await db.rooms.where('locationId').equals(selectedLocationId).toArray();
+      if (locRooms.length > 0) return locRooms;
     }
-    return await db.rooms.toArray();
+    const all = await db.rooms.toArray();
+    if (all.length > 0) return all;
+    scheduleSeedIfEmpty();
+    return [];
   }, [selectedLocationId]) || [];
+
+  // Auto-sync selectedRoomId if null/empty or if pointing to a non-existent room
+  useEffect(() => {
+    if (rooms.length > 0) {
+      const exists = rooms.some((r) => r.id === selectedRoomId);
+      if (!exists) {
+        setSelectedRoomId(rooms[0].id);
+      }
+    }
+  }, [rooms, selectedRoomId, setSelectedRoomId]);
 
   // Focus search input when search is opened
   useEffect(() => {
@@ -75,22 +82,27 @@ export const Header: React.FC = () => {
   return (
     <header className="w-full bg-white border-b border-slate-200 text-slate-800 px-3 sm:px-4 py-2 sm:py-2.5 flex items-center justify-between gap-2 sm:gap-3 shadow-xs select-none z-30">
       {/* Header Left Content: Logo & Room Selector */}
-      <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
         <div className="flex items-center gap-1.5 font-black text-base sm:text-lg tracking-tight text-slate-900 flex-shrink-0">
           <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-blue-600 flex items-center justify-center shadow-md shadow-blue-500/20 text-white font-mono text-xs sm:text-sm font-bold">
             ⌖
           </div>
-          <span className="font-bold text-sm sm:text-base">Placemend</span>
+          <span className="font-bold text-sm sm:text-base hidden sm:inline">Placemend</span>
         </div>
 
-        {/* Room Selector (Always accessible) */}
-        <div className="flex items-center gap-1.5 bg-slate-100 px-2.5 py-1.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium min-h-[38px]">
-          <MapPin className="w-4 h-4 text-blue-600 flex-shrink-0" />
+        {/* Room Selector (Always accessible, flexible width on mobile) */}
+        <div className="flex items-center gap-1 bg-slate-100 hover:bg-slate-200/60 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium min-h-[38px] min-w-0 max-w-full sm:max-w-[340px] md:max-w-sm flex-1 transition-colors">
+          <MapPin className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 flex-shrink-0" />
           <select
             value={selectedRoomId || ''}
             onChange={(e) => setSelectedRoomId(e.target.value)}
-            className="bg-transparent text-slate-800 font-bold focus:outline-none cursor-pointer pr-1 truncate max-w-[120px] sm:max-w-[180px]"
+            className="bg-transparent text-slate-800 font-bold focus:outline-none cursor-pointer pr-1 truncate w-full min-w-0 text-xs sm:text-sm tracking-tight"
           >
+            {rooms.length === 0 && (
+              <option value="" disabled className="bg-white text-slate-400">
+                No rooms
+              </option>
+            )}
             {rooms.map((room) => (
               <option key={room.id} value={room.id} className="bg-white text-slate-800 font-semibold">
                 {room.name}
@@ -99,24 +111,20 @@ export const Header: React.FC = () => {
           </select>
           <button
             onClick={() => setRoomManagerOpen(true)}
-            className="p-1 text-slate-400 hover:text-blue-600 hover:bg-slate-200/60 rounded-md transition-colors cursor-pointer flex-shrink-0"
-            title="Manage Rooms & Spaces (Add or Remove Rooms)"
+            className="hidden sm:flex p-1 text-slate-400 hover:text-blue-600 hover:bg-slate-200/80 rounded-md transition-colors cursor-pointer flex-shrink-0"
+            title="Manage Rooms & Spaces (Add, Rename, or Remove Rooms)"
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
           </button>
-        </div>
-
-        {/* Room Shape Button (Edit Mode, Desktop) */}
-        {appMode === 'edit' && (
           <button
-            onClick={() => setRoomShapeModalOpen(true)}
-            className="hidden md:flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 transition-all cursor-pointer"
-            title="Configure Room Shape (L-Shape, T-Shape, Box)"
+            onClick={() => setMultiRoomOverviewOpen(true)}
+            className="p-1 text-slate-500 hover:text-blue-600 hover:bg-slate-200/80 rounded-md transition-colors cursor-pointer flex-shrink-0 flex items-center gap-1"
+            title="Multi-Room Connected Overview (House Floor Plan Grid)"
           >
-            <Pentagon className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Room Shape</span>
+            <LayoutGrid className="w-3.5 h-3.5 text-blue-600" />
+            <span className="hidden lg:inline text-xs font-bold text-slate-700">All Rooms</span>
           </button>
-        )}
+        </div>
       </div>
 
       {/* Center: Live Search Bar (Desktop) */}
@@ -163,32 +171,14 @@ export const Header: React.FC = () => {
 
       {/* Right Controls */}
       <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
-        {/* Mobile Search Button */}
-        <button
-          onClick={() => setSearchOpen(true)}
-          className={`md:hidden px-2.5 py-1.5 rounded-xl transition-all cursor-pointer min-h-[38px] flex items-center gap-1 shadow-xs active:scale-95 ${
-            isSearching 
-              ? 'bg-amber-500 text-white shadow-amber-500/25 ring-2 ring-amber-300' 
-              : 'text-slate-600 hover:text-blue-600 hover:bg-slate-100 bg-slate-50 border border-slate-200'
-          }`}
-          title="Search items visually"
-        >
-          <Search className="w-4 h-4" />
-          {isSearching && (
-            <span className="text-xs font-black font-mono">
-              {totalMatches}
-            </span>
-          )}
-        </button>
-
         {/* View vs Edit Mode Toggle (Responsive) */}
-        <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200">
+        <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 shadow-2xs">
           <button
             onClick={() => {
               setAppMode('view');
               setSelectedFurnitureId(null);
             }}
-            className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            className={`flex items-center gap-1 px-1.5 py-1 sm:px-2.5 sm:py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               appMode === 'view'
                 ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
                 : 'text-slate-500 hover:text-slate-800'
@@ -196,7 +186,7 @@ export const Header: React.FC = () => {
             title="View Mode"
           >
             <Eye className="w-3.5 h-3.5 text-blue-600" />
-            <span>View</span>
+            <span className="hidden xs:inline sm:inline">View</span>
           </button>
 
           <button
@@ -204,7 +194,7 @@ export const Header: React.FC = () => {
               setAppMode('edit');
               setSelectedFurnitureId(null);
             }}
-            className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            className={`flex items-center gap-1 px-1.5 py-1 sm:px-2.5 sm:py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               appMode === 'edit'
                 ? 'bg-blue-600 text-white shadow-xs'
                 : 'text-slate-500 hover:text-slate-800'
@@ -212,62 +202,33 @@ export const Header: React.FC = () => {
             title="Edit Mode"
           >
             <Edit3 className="w-3.5 h-3.5" />
-            <span>Edit</span>
+            <span className="hidden xs:inline sm:inline">Edit</span>
           </button>
         </div>
 
-        {/* Desktop Add Button */}
-        {appMode === 'edit' && (
-          <button
-            onClick={() => setFurnitureLibraryOpen(true)}
-            className="hidden md:flex bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-xl items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-            title="Add furniture"
-          >
-            <Plus className="w-4 h-4 stroke-[2.5]" />
-            <span>Add</span>
-          </button>
-        )}
+        {/* Canvas controls (add, room shape, dimensions, recenter, fullscreen) live in the canvas toolbar;
+            backup & tools live in the account menu. */}
 
-        {/* Dimensions Toggle Button (Desktop) */}
+        {/* User Account / Sign In Button (Far Top Right) */}
         <button
-          onClick={() => toggleShowDimensions()}
-          className={`hidden md:flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-xl transition-colors cursor-pointer border ${
-            showDimensions
-              ? 'bg-blue-50 text-blue-600 border-blue-200'
-              : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100 border-transparent hover:border-slate-200'
-          }`}
-          title={showDimensions ? 'Dimensions: ON (Click to hide dimensions)' : 'Dimensions: OFF (Click to show dimensions)'}
+          onClick={() => setAccountModalOpen(true)}
+          className="flex items-center gap-1.5 px-2 py-1 sm:px-2.5 sm:py-1 text-xs font-bold rounded-xl transition-all cursor-pointer border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 shadow-2xs active:scale-95 min-h-[34px]"
+          title={currentUser ? `Account: ${currentUser.name} (${currentUser.email})` : 'Sign In to Placemend'}
         >
-          <Ruler className="w-3.5 h-3.5 text-blue-600" />
-          <span>Dimensions</span>
-        </button>
-
-        {/* Recenter Button (Desktop) */}
-        <button
-          onClick={() => resetView()}
-          className="hidden md:flex p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer border border-transparent hover:border-slate-200"
-          title="Recenter Floor Plan View"
-        >
-          <Maximize2 className="w-4 h-4" />
-        </button>
-
-        {/* AI & API Sync Button */}
-        <button
-          onClick={() => setApiSyncModalOpen(true)}
-          className="px-2.5 py-1.5 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 bg-indigo-50/60 rounded-xl transition-colors cursor-pointer border border-indigo-200/80 min-h-[38px] flex items-center justify-center gap-1.5 font-bold text-xs shadow-xs active:scale-95"
-          title="AI Room Indexing & API Sync"
-        >
-          <Sparkles className="w-3.5 h-3.5 text-indigo-600 fill-indigo-200" />
-          <span className="hidden sm:inline">AI Sync</span>
-        </button>
-
-        {/* Backup Button */}
-        <button
-          onClick={() => setBackupModalOpen(true)}
-          className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer border border-transparent hover:border-slate-200 min-w-[38px] min-h-[38px] flex items-center justify-center"
-          title="Backup & Export JSON Data"
-        >
-          <Download className="w-4.5 h-4.5" />
+          {currentUser?.picture ? (
+            <img
+              src={currentUser.picture}
+              alt={currentUser.name}
+              className="w-5 h-5 rounded-full object-cover"
+            />
+          ) : (
+            <div className="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center text-white text-[10px]">
+              <User className="w-3 h-3 text-white" />
+            </div>
+          )}
+          <span className="hidden sm:inline truncate max-w-[110px]">
+            {currentUser ? currentUser.name : 'Sign In'}
+          </span>
         </button>
       </div>
     </header>

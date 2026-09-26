@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { User, getStoredUser } from '../services/auth';
 
 export type AppMode = 'view' | 'edit';
 
@@ -14,6 +15,10 @@ export interface AppState {
   selectedFurnitureId: string | null;
   selectedContainerId: string | null;
   highlightedFurnitureId: string | null;
+
+  // User Account & Authentication
+  currentUser: User | null;
+  setCurrentUser: (user: User | null) => void;
 
   // Canvas Viewport Controls
   zoom: number;
@@ -33,6 +38,13 @@ export interface AppState {
   isFurnitureLibraryOpen: boolean;
   isBackupModalOpen: boolean;
   isApiSyncModalOpen: boolean;
+  isAccountModalOpen: boolean;
+  setAccountModalOpen: (open: boolean) => void;
+  isConnectRoomModalOpen: boolean;
+  connectRoomDoorContext: { roomId: string; doorId: string } | null;
+  setConnectRoomModalOpen: (open: boolean, context?: { roomId: string; doorId: string } | null) => void;
+  isMultiRoomOverviewOpen: boolean;
+  setMultiRoomOverviewOpen: (open: boolean) => void;
 
   // Search
   searchQuery: string;
@@ -77,12 +89,15 @@ export const useAppStore = create<AppState>((set) => ({
   selectedContainerId: null,
   highlightedFurnitureId: null,
 
+  currentUser: typeof window !== 'undefined' ? getStoredUser() : null,
+  setCurrentUser: (user) => set({ currentUser: user }),
+
   zoom: typeof window !== 'undefined' && window.innerWidth < 768 ? 0.46 : 1,
   panOffset: typeof window !== 'undefined' && window.innerWidth < 768 ? { x: 12, y: 180 } : { x: 80, y: 80 },
   fitViewTrigger: 0,
   gridSnap: true,
   showLabels: true,
-  showDimensions: true,
+  showDimensions: false,
   isRoomShapeModalOpen: false,
   roomShapeModalTab: 'presets',
 
@@ -93,6 +108,17 @@ export const useAppStore = create<AppState>((set) => ({
   isFurnitureLibraryOpen: false,
   isBackupModalOpen: false,
   isApiSyncModalOpen: false,
+  isAccountModalOpen: false,
+  setAccountModalOpen: (open) => set({ isAccountModalOpen: open }),
+  isConnectRoomModalOpen: false,
+  connectRoomDoorContext: null,
+  setConnectRoomModalOpen: (open, context = null) =>
+    set({
+      isConnectRoomModalOpen: open,
+      connectRoomDoorContext: context !== undefined ? context : null,
+    }),
+  isMultiRoomOverviewOpen: false,
+  setMultiRoomOverviewOpen: (open) => set({ isMultiRoomOverviewOpen: open }),
   searchQuery: '',
 
   setSelectedLocationId: (id) => set({ selectedLocationId: id }),
@@ -109,7 +135,7 @@ export const useAppStore = create<AppState>((set) => ({
 
   setZoom: (zoomOrFn) =>
     set((state) => ({
-      zoom: Math.min(3, Math.max(0.15, typeof zoomOrFn === 'function' ? zoomOrFn(state.zoom) : zoomOrFn)),
+      zoom: Math.min(8, Math.max(0.15, typeof zoomOrFn === 'function' ? zoomOrFn(state.zoom) : zoomOrFn)),
     })),
 
   setPanOffset: (offsetOrFn) =>

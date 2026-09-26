@@ -3,7 +3,9 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
 import { Room } from '../types';
-import { X, Plus, Trash2, MapPin, Grid } from 'lucide-react';
+import { X, Plus, Trash2, MapPin, Grid, Edit3, Check, Download } from 'lucide-react';
+import { isAutoSyncEnabled, pushLocalToRemote } from '../services/apiSync';
+import { scheduleSeedIfEmpty } from '../db/sampleData';
 
 export const RoomManagerModal: React.FC = () => {
   const {
@@ -12,18 +14,26 @@ export const RoomManagerModal: React.FC = () => {
     selectedLocationId,
     selectedRoomId,
     setSelectedRoomId,
+    setBackupModalOpen,
   } = useAppStore();
 
   const [name, setName] = useState('');
-  const [gridWidth, setGridWidth] = useState(24);
-  const [gridHeight, setGridHeight] = useState(18);
+  const [gridWidth, setGridWidth] = useState(4);
+  const [gridHeight, setGridHeight] = useState(4);
   const [color, setColor] = useState('#3b82f6');
+  const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
+  const [editingRoomName, setEditingRoomName] = useState('');
 
-  const rooms = useLiveQuery(() => 
-    selectedLocationId 
-      ? db.rooms.where('locationId').equals(selectedLocationId).toArray()
-      : db.rooms.toArray()
-  , [selectedLocationId]) || [];
+  const rooms = useLiveQuery(async () => {
+    if (selectedLocationId) {
+      const locRooms = await db.rooms.where('locationId').equals(selectedLocationId).toArray();
+      if (locRooms.length > 0) return locRooms;
+    }
+    const all = await db.rooms.toArray();
+    if (all.length > 0) return all;
+    scheduleSeedIfEmpty();
+    return [];
+  }, [selectedLocationId]) || [];
 
   if (!isRoomManagerOpen) return null;
 
@@ -31,13 +41,26 @@ export const RoomManagerModal: React.FC = () => {
     e.preventDefault();
     if (!name.trim()) return;
 
+    const width = Math.max(2, Math.min(50, gridWidth));
+    const length = Math.max(2, Math.min(50, gridHeight));
     const newRoom: Room = {
       id: `room-${Date.now()}`,
       locationId: selectedLocationId || 'loc-home',
       name: name.trim(),
       color,
-      gridWidth: Math.max(10, Math.min(50, gridWidth)),
-      gridHeight: Math.max(10, Math.min(50, gridHeight)),
+      shapeType: 'rectangle',
+      doors: [
+        {
+          id: `door-${Date.now()}`,
+          label: 'Main Entrance',
+          wall: 'bottom',
+          offset: Math.max(0, Math.floor((width - 1) / 2)),
+          swing: 'inward_left',
+          width: 1,
+        },
+      ],
+      gridWidth: width,
+      gridHeight: length,
       unitSize: 32,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -46,6 +69,10 @@ export const RoomManagerModal: React.FC = () => {
     await db.rooms.add(newRoom);
     setSelectedRoomId(newRoom.id);
     setName('');
+
+    if (isAutoSyncEnabled()) {
+      pushLocalToRemote().catch(console.error);
+    }
   };
 
   const handleDeleteRoom = async (roomId: string) => {
@@ -70,7 +97,25 @@ export const RoomManagerModal: React.FC = () => {
         const remaining = rooms.filter((r) => r.id !== roomId);
         setSelectedRoomId(remaining[0]?.id || null);
       }
+
+      if (isAutoSyncEnabled()) {
+        pushLocalToRemote().catch(console.error);
+      }
     }
+  };
+
+  const handleSaveRename = async (roomId: string) => {
+    const trimmed = editingRoomName.trim();
+    if (trimmed) {
+      await db.rooms.update(roomId, {
+        name: trimmed,
+        updatedAt: Date.now(),
+      });
+      if (isAutoSyncEnabled()) {
+        pushLocalToRemote().catch(console.error);
+      }
+    }
+    setEditingRoomId(null);
   };
 
   return (
@@ -103,46 +148,91 @@ export const RoomManagerModal: React.FC = () => {
             </label>
             {rooms.map((room) => {
               const isActive = room.id === selectedRoomId;
+              const isEditing = editingRoomId === room.id;
               return (
                 <div
                   key={room.id}
-                  onClick={() => setSelectedRoomId(room.id)}
-                  className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 cursor-pointer transition-all ${
+                  onClick={() => !isEditing && setSelectedRoomId(room.id)}
+                  className={`p-3 rounded-2xl border flex items-center justify-between gap-3 cursor-pointer transition-all ${
                     isActive
                       ? 'bg-blue-50/80 border-2 border-blue-500 text-blue-950 shadow-xs'
                       : 'bg-slate-50 hover:bg-slate-100/80 border-slate-200 text-slate-700'
                   }`}
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
                     <div
                       style={{ backgroundColor: room.color }}
                       className="w-5 h-5 rounded-lg shadow-sm border border-black/10 flex-shrink-0"
                     />
-                    <div>
-                      <h5 className="font-bold text-xs sm:text-sm text-slate-900">{room.name}</h5>
-                      <p className="text-[11px] text-slate-500 font-mono">
-                        {room.gridWidth}m × {room.gridHeight}m
-                      </p>
-                    </div>
+                    {isEditing ? (
+                      <div className="flex items-center gap-1.5 flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="text"
+                          autoFocus
+                          value={editingRoomName}
+                          onChange={(e) => setEditingRoomName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveRename(room.id);
+                            if (e.key === 'Escape') setEditingRoomId(null);
+                          }}
+                          className="flex-1 bg-white text-slate-900 text-xs sm:text-sm px-2.5 py-1.5 rounded-xl border border-blue-400 font-bold focus:outline-none focus:ring-2 focus:ring-blue-100 shadow-xs"
+                          placeholder="Room name"
+                        />
+                        <button
+                          onClick={() => handleSaveRename(room.id)}
+                          className="p-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors cursor-pointer flex-shrink-0"
+                          title="Save room name"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setEditingRoomId(null)}
+                          className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer flex-shrink-0"
+                          title="Cancel"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="min-w-0 flex-1">
+                        <h5 className="font-bold text-xs sm:text-sm text-slate-900 truncate">{room.name}</h5>
+                        <p className="text-[11px] text-slate-500 font-mono">
+                          {room.gridWidth}m × {room.gridHeight}m
+                        </p>
+                      </div>
+                    )}
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    {isActive && (
-                      <span className="text-[10px] font-mono font-bold bg-blue-600 text-white px-2 py-0.5 rounded-full shadow-xs">
-                        Active
-                      </span>
-                    )}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteRoom(room.id);
-                      }}
-                      className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
-                      title="Delete Room"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                  {!isEditing && (
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {isActive && (
+                        <span className="text-[10px] font-mono font-bold bg-blue-600 text-white px-2 py-0.5 rounded-full shadow-xs">
+                          Active
+                        </span>
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingRoomId(room.id);
+                          setEditingRoomName(room.name);
+                        }}
+                        className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer"
+                        title="Rename Room"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteRoom(room.id);
+                        }}
+                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
+                        title="Delete Room"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -175,8 +265,8 @@ export const RoomManagerModal: React.FC = () => {
                   </label>
                   <input
                     type="number"
-                    min={10}
-                    max={60}
+                    min={2}
+                    max={50}
                     value={gridWidth}
                     onChange={(e) => setGridWidth(parseInt(e.target.value, 10) || 20)}
                     className="w-full bg-white text-slate-900 text-xs px-3 py-2 rounded-xl border border-slate-300 font-mono shadow-xs focus:outline-none focus:border-blue-500"
@@ -184,12 +274,12 @@ export const RoomManagerModal: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Height (meters)
+                    Length (meters)
                   </label>
                   <input
                     type="number"
-                    min={10}
-                    max={60}
+                    min={2}
+                    max={50}
                     value={gridHeight}
                     onChange={(e) => setGridHeight(parseInt(e.target.value, 10) || 16)}
                     className="w-full bg-white text-slate-900 text-xs px-3 py-2 rounded-xl border border-slate-300 font-mono shadow-xs focus:outline-none focus:border-blue-500"
@@ -205,6 +295,21 @@ export const RoomManagerModal: React.FC = () => {
                 <span>Add Room</span>
               </button>
             </form>
+          </div>
+
+          {/* Data Backup & Export Section */}
+          <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => {
+                setRoomManagerOpen(false);
+                setBackupModalOpen(true);
+              }}
+              className="w-full py-2.5 px-3 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            >
+              <Download className="w-4 h-4 text-slate-500" />
+              <span>Backup & Export All Data (JSON)</span>
+            </button>
           </div>
         </div>
       </div>

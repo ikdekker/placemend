@@ -8,6 +8,8 @@ export interface DoorSvgGeometry {
   hingePoint: { x: number; y: number };
   jambs: Array<{ x: number; y: number; w: number; h: number }>;
   badgePos: { x: number; y: number; wall: WallSide | string };
+  exteriorPortalPos: { x: number; y: number; wall: WallSide | string };
+  outwardNormal: { x: number; y: number };
 }
 
 export interface WallSegment {
@@ -27,7 +29,7 @@ export interface WallSegment {
  */
 export function getRoomDoors(room: Room | undefined | null): RoomDoor[] {
   if (!room) return [];
-  if (room.doors && room.doors.length > 0) {
+  if (Array.isArray(room.doors)) {
     return room.doors.map((d, idx) => ({
       ...d,
       id: d.id || `door-${idx + 1}`,
@@ -237,12 +239,24 @@ export function getDoorSvgGeometry(
     { x: t2x - jambSize / 2, y: t2y - jambSize / 2, w: jambSize, h: jambSize },
   ];
 
-  // Interactive badge position: centered along threshold, offset 26px along inward normal
+  // Inward normal is (nx, ny)
+  // Outward normal points straight outside the room: (-nx, -ny)
+  const outwardNx = -nx;
+  const outwardNy = -ny;
+
+  // Interactive badge position (Edit Mode): along the wall threshold, slightly outward
   const midX = (t1x + t2x) / 2;
   const midY = (t1y + t2y) / 2;
   const badgePos = {
-    x: midX + nx * 26,
-    y: midY + ny * 26,
+    x: midX + outwardNx * 4,
+    y: midY + outwardNy * 4,
+    wall: seg.wallSide || (seg.isSlanted ? 'slanted' : 'bottom'),
+  };
+
+  // Walk-through portal position (View Mode): 40px OUTSIDE the room surface
+  const exteriorPortalPos = {
+    x: midX + outwardNx * 40,
+    y: midY + outwardNy * 40,
     wall: seg.wallSide || (seg.isSlanted ? 'slanted' : 'bottom'),
   };
 
@@ -253,6 +267,8 @@ export function getDoorSvgGeometry(
     hingePoint,
     jambs,
     badgePos,
+    exteriorPortalPos,
+    outwardNormal: { x: outwardNx, y: outwardNy },
   };
 }
 
@@ -536,14 +552,17 @@ export function snapFurniturePosition(
   roomW: number,
   roomH: number,
   polygonPoints?: Point2D[],
-  gridSnapEnabled: boolean = true
+  gridSnapEnabled: boolean = true,
+  otherFurniture?: Array<{ x: number; y: number; width: number; length: number; rotation?: number }>
 ): { x: number; y: number } {
-  let x = gridSnapEnabled ? Math.round(targetX) : targetX;
-  let y = gridSnapEnabled ? Math.round(targetY) : targetY;
+  // Rooms and furniture are measured in meters; the grid snaps to 10cm
+  let x = gridSnapEnabled ? Math.round(targetX * 10) / 10 : targetX;
+  let y = gridSnapEnabled ? Math.round(targetY * 10) / 10 : targetY;
 
-  // Magnetic wall snap threshold (0.35 grid units ≈ 11px)
-  const snapThreshold = 0.35;
+  // Magnetic snap threshold (20cm)
+  const snapThreshold = 0.2;
 
+  // 1. Magnetic Wall Snap
   if (Math.abs(x) < snapThreshold) {
     x = 0; // Flush against left wall
   } else if (Math.abs(x - (roomW - furnW)) < snapThreshold) {
@@ -554,6 +573,61 @@ export function snapFurniturePosition(
     y = 0; // Flush against top wall
   } else if (Math.abs(y - (roomH - furnL)) < snapThreshold) {
     y = Math.max(0, roomH - furnL); // Flush against bottom wall
+  }
+
+  // 2. Modular Furniture-to-Furniture Edge Snapping (Snap flush to neighbor pieces to form L-shapes or rows)
+  if (otherFurniture && otherFurniture.length > 0) {
+    for (const other of otherFurniture) {
+      const isRot = (other.rotation || 0) % 180 !== 0;
+      const oW = isRot ? other.length : other.width;
+      const oL = isRot ? other.width : other.length;
+      const oLeft = other.x;
+      const oRight = other.x + oW;
+      const oTop = other.y;
+      const oBottom = other.y + oL;
+
+      // Vertical overlap check for horizontal flush snapping
+      const hasYOverlap = (y < oBottom + 0.1) && (y + furnL > oTop - 0.1);
+      if (hasYOverlap) {
+        // Snap to other's right edge (x = oRight)
+        if (Math.abs(x - oRight) < snapThreshold) {
+          x = oRight;
+        }
+        // Snap to other's left edge (x + furnW = oLeft)
+        else if (Math.abs((x + furnW) - oLeft) < snapThreshold) {
+          x = oLeft - furnW;
+        }
+        // Collinear top alignment (y = oTop)
+        if (Math.abs(y - oTop) < snapThreshold) {
+          y = oTop;
+        }
+        // Collinear bottom alignment (y + furnL = oBottom)
+        else if (Math.abs((y + furnL) - oBottom) < snapThreshold) {
+          y = oBottom - furnL;
+        }
+      }
+
+      // Horizontal overlap check for vertical flush snapping
+      const hasXOverlap = (x < oRight + 0.1) && (x + furnW > oLeft - 0.1);
+      if (hasXOverlap) {
+        // Snap to other's bottom edge (y = oBottom)
+        if (Math.abs(y - oBottom) < snapThreshold) {
+          y = oBottom;
+        }
+        // Snap to other's top edge (y + furnL = oTop)
+        else if (Math.abs((y + furnL) - oTop) < snapThreshold) {
+          y = oTop - furnL;
+        }
+        // Collinear left alignment (x = oLeft)
+        if (Math.abs(x - oLeft) < snapThreshold) {
+          x = oLeft;
+        }
+        // Collinear right alignment (x + furnW = oRight)
+        else if (Math.abs((x + furnW) - oRight) < snapThreshold) {
+          x = oRight - furnW;
+        }
+      }
+    }
   }
 
   // Clamp to rectangular bounds

@@ -19,9 +19,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 /**
- * Extract workspace API key from headers or query string
+ * Extract workspace API key, rejecting account keys that no user holds (e.g. rotated keys)
  */
 function getWorkspaceApiKey(): string {
+    $key = readWorkspaceApiKey();
+    if (strpos($key, 'pm_usr_') === 0 && !isAssignedUserWorkspaceKey($key)) {
+        sendJsonError('Unknown or revoked workspace key. Please sign in again.', 403);
+    }
+    return $key;
+}
+
+function isAssignedUserWorkspaceKey(string $key): bool {
+    $users = json_decode((string)@file_get_contents(getDataDirectory() . '/accounts/users.json'), true);
+    foreach (is_array($users) ? $users : [] as $u) {
+        if (isset($u['workspaceKey']) && hash_equals((string)$u['workspaceKey'], $key)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Extract workspace API key from headers or query string
+ */
+function readWorkspaceApiKey(): string {
     if (!empty($_SERVER['HTTP_X_API_KEY'])) {
         return trim($_SERVER['HTTP_X_API_KEY']);
     }
