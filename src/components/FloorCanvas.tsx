@@ -33,6 +33,8 @@ import {
 import { rotateRoom90Clockwise, mirrorRoom, getDoorSvgGeometry, getRoomDoors, snapFurniturePosition, getRoomWallSegments } from '../utils/roomGeometry';
 import { scheduleAutoSync } from '../services/apiSync';
 import { seedDemoDataIfEmpty, scheduleSeedIfEmpty } from '../db/sampleData';
+import { roundCm, snapTo, formatMeters } from '../utils/measure';
+import { MeterInput } from './MeterInput';
 
 export const FloorCanvas: React.FC = () => {
   const {
@@ -391,9 +393,7 @@ export const FloorCanvas: React.FC = () => {
         const projPx = dx * ux + dy * uy;
         const deltaUnits = projPx / (unitSize * zoom);
         let newOffset = doorDragStart.origOffset + deltaUnits;
-        if (gridSnap) {
-          newOffset = Math.round(newOffset);
-        }
+        newOffset = gridSnap ? snapTo(newOffset, 0.1) : roundCm(newOffset);
         const widthUnits = curDoor.width || 2;
         const maxOffset = Math.max(0, seg.length - widthUnits);
         newOffset = Math.max(0, Math.min(maxOffset, newOffset));
@@ -781,15 +781,16 @@ export const FloorCanvas: React.FC = () => {
   };
 
   // Quick resize dimension adjustments (+/- width or length in grid units)
-  const adjustFurnitureDimension = async (axis: 'w' | 'l', delta: number, e?: React.SyntheticEvent) => {
-    e?.stopPropagation();
-    e?.preventDefault();
+  // Set width or length to an exact value (cm precision), or step it by delta
+  const setFurnitureDimension = async (axis: 'w' | 'l', value: number | ((current: number) => number)) => {
     if (!selectedFurnitureId) return;
     const currentId = selectedFurnitureId;
     const furn = await db.furniture.get(currentId);
     if (furn) {
-      const newW = axis === 'w' ? Math.round(Math.max(0.2, Math.min(30, furn.dimension.width + delta)) * 10) / 10 : furn.dimension.width;
-      const newL = axis === 'l' ? Math.round(Math.max(0.2, Math.min(30, furn.dimension.length + delta)) * 10) / 10 : furn.dimension.length;
+      const clamp = (v: number) => roundCm(Math.max(0.1, Math.min(30, v)));
+      const next = (cur: number) => clamp(typeof value === 'function' ? value(cur) : value);
+      const newW = axis === 'w' ? next(furn.dimension.width) : furn.dimension.width;
+      const newL = axis === 'l' ? next(furn.dimension.length) : furn.dimension.length;
       await db.furniture.update(currentId, {
         dimension: {
           ...furn.dimension,
@@ -802,6 +803,12 @@ export const FloorCanvas: React.FC = () => {
       pointerDownPos.current.targetFurnitureId = currentId;
       setSelectedFurnitureId(currentId);
     }
+  };
+
+  const adjustFurnitureDimension = (axis: 'w' | 'l', delta: number, e?: React.SyntheticEvent) => {
+    e?.stopPropagation();
+    e?.preventDefault();
+    return setFurnitureDimension(axis, (cur) => cur + delta);
   };
 
   // Delete selected furniture
@@ -1142,18 +1149,23 @@ export const FloorCanvas: React.FC = () => {
                 <button
                   onClick={(e) => adjustFurnitureDimension('w', -0.1, e)}
                   onMouseDown={(e) => e.stopPropagation()}
-                  className="w-5 h-5 flex items-center justify-center rounded bg-white hover:bg-slate-200 text-slate-700 shadow-2xs font-bold text-xs active:scale-90"
+                  className="w-7 h-7 flex items-center justify-center rounded-md bg-white hover:bg-slate-200 text-slate-700 shadow-2xs font-bold text-xs active:scale-90"
                   title="Decrease Width (-10cm)"
                 >
                   <Minus className="w-2.5 h-2.5" />
                 </button>
-                <span className="font-mono text-xs font-black text-slate-800 px-1 min-w-[20px] text-center">
-                  {furnW}m
-                </span>
+                <MeterInput
+                  aria-label="Width in meters"
+                  value={furnW}
+                  min={0.1}
+                  max={30}
+                  onChange={(m) => setFurnitureDimension('w', m)}
+                  className="w-12 font-mono text-xs font-black text-slate-800 bg-white rounded-md px-1 py-1 text-center border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
                 <button
                   onClick={(e) => adjustFurnitureDimension('w', 0.1, e)}
                   onMouseDown={(e) => e.stopPropagation()}
-                  className="w-5 h-5 flex items-center justify-center rounded bg-white hover:bg-slate-200 text-slate-700 shadow-2xs font-bold text-xs active:scale-90"
+                  className="w-7 h-7 flex items-center justify-center rounded-md bg-white hover:bg-slate-200 text-slate-700 shadow-2xs font-bold text-xs active:scale-90"
                   title="Increase Width (+10cm)"
                 >
                   <Plus className="w-2.5 h-2.5" />
@@ -1168,18 +1180,23 @@ export const FloorCanvas: React.FC = () => {
                 <button
                   onClick={(e) => adjustFurnitureDimension('l', -0.1, e)}
                   onMouseDown={(e) => e.stopPropagation()}
-                  className="w-5 h-5 flex items-center justify-center rounded bg-white hover:bg-slate-200 text-slate-700 shadow-2xs font-bold text-xs active:scale-90"
+                  className="w-7 h-7 flex items-center justify-center rounded-md bg-white hover:bg-slate-200 text-slate-700 shadow-2xs font-bold text-xs active:scale-90"
                   title="Decrease Length (-10cm)"
                 >
                   <Minus className="w-2.5 h-2.5" />
                 </button>
-                <span className="font-mono text-xs font-black text-slate-800 px-1 min-w-[20px] text-center">
-                  {furnL}m
-                </span>
+                <MeterInput
+                  aria-label="Length in meters"
+                  value={furnL}
+                  min={0.1}
+                  max={30}
+                  onChange={(m) => setFurnitureDimension('l', m)}
+                  className="w-12 font-mono text-xs font-black text-slate-800 bg-white rounded-md px-1 py-1 text-center border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
                 <button
                   onClick={(e) => adjustFurnitureDimension('l', 0.1, e)}
                   onMouseDown={(e) => e.stopPropagation()}
-                  className="w-5 h-5 flex items-center justify-center rounded bg-white hover:bg-slate-200 text-slate-700 shadow-2xs font-bold text-xs active:scale-90"
+                  className="w-7 h-7 flex items-center justify-center rounded-md bg-white hover:bg-slate-200 text-slate-700 shadow-2xs font-bold text-xs active:scale-90"
                   title="Increase Length (+10cm)"
                 >
                   <Plus className="w-2.5 h-2.5" />
@@ -1661,7 +1678,8 @@ export const FloorCanvas: React.FC = () => {
                   isHighlighted={isHighlighted || isSearchMatch}
                   showLabels={showLabels}
                   showDimensions={showDimensions}
-                  dimensionText={`${dimW}m × ${dimL}m`}
+                  dimensionText={`${formatMeters(dimW, false)} × ${formatMeters(dimL)}`}
+                  labelScale={1 / zoom}
                 />
 
                 {/* Live Resizing Dimension Tooltip */}
@@ -1697,7 +1715,7 @@ export const FloorCanvas: React.FC = () => {
                       data-resize-handle="corner"
                       onMouseDown={(e) => startResizing(e, furn.id, 'corner')}
                       onTouchStart={(e) => startResizing(e, furn.id, 'corner')}
-                      style={{ touchAction: 'none' }}
+                      style={{ touchAction: 'none', transform: `scale(${1 / zoom})`, transformOrigin: '100% 100%' }}
                       className="absolute -bottom-2.5 -right-2.5 w-7 h-7 rounded-xl bg-blue-600 hover:bg-blue-700 text-white shadow-xl flex items-center justify-center cursor-se-resize z-40 border-2 border-white ring-2 ring-blue-500/40 transition-transform active:scale-125 before:absolute before:-inset-3 before:content-[''] select-none"
                       title="Drag corner to resize dimensions"
                     >
@@ -1710,8 +1728,8 @@ export const FloorCanvas: React.FC = () => {
                         data-resize-handle="width"
                         onMouseDown={(e) => startResizing(e, furn.id, 'width')}
                         onTouchStart={(e) => startResizing(e, furn.id, 'width')}
-                        style={{ touchAction: 'none' }}
-                        className="absolute top-1/2 -right-1.5 -translate-y-1/2 w-3 h-8 rounded-full bg-white hover:bg-blue-50 text-blue-600 shadow-md flex items-center justify-center cursor-ew-resize z-35 border-2 border-blue-500 transition-transform active:scale-125 before:absolute before:-inset-2 before:content-[''] select-none"
+                        style={{ touchAction: 'none', transform: `translateY(-50%) scale(${1 / zoom})`, transformOrigin: '100% 50%' }}
+                        className="absolute top-1/2 -right-1.5w-3 h-8 rounded-full bg-white hover:bg-blue-50 text-blue-600 shadow-md flex items-center justify-center cursor-ew-resize z-35 border-2 border-blue-500 transition-transform active:scale-125 before:absolute before:-inset-2 before:content-[''] select-none"
                         title="Drag edge to resize horizontal dimension"
                       >
                         <div className="w-0.5 h-3 bg-blue-500 rounded-full" />
@@ -1724,8 +1742,8 @@ export const FloorCanvas: React.FC = () => {
                         data-resize-handle="length"
                         onMouseDown={(e) => startResizing(e, furn.id, 'length')}
                         onTouchStart={(e) => startResizing(e, furn.id, 'length')}
-                        style={{ touchAction: 'none' }}
-                        className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-8 h-3 rounded-full bg-white hover:bg-blue-50 text-blue-600 shadow-md flex items-center justify-center cursor-ns-resize z-35 border-2 border-blue-500 transition-transform active:scale-125 before:absolute before:-inset-2 before:content-[''] select-none"
+                        style={{ touchAction: 'none', transform: `translateX(-50%) scale(${1 / zoom})`, transformOrigin: '50% 100%' }}
+                        className="absolute -bottom-1.5 left-1/2w-8 h-3 rounded-full bg-white hover:bg-blue-50 text-blue-600 shadow-md flex items-center justify-center cursor-ns-resize z-35 border-2 border-blue-500 transition-transform active:scale-125 before:absolute before:-inset-2 before:content-[''] select-none"
                         title="Drag edge to resize vertical dimension"
                       >
                         <div className="w-3 h-0.5 bg-blue-500 rounded-full" />

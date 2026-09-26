@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { MeterInput } from './MeterInput';
+import { roundCm } from '../utils/measure';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
@@ -19,13 +21,13 @@ import {
 } from 'lucide-react';
 
 const ROOM_TEMPLATES = [
-  { name: 'Hallway / Corridor', width: 12, height: 6, color: '#64748b' },
-  { name: 'Kitchen & Dining', width: 16, height: 12, color: '#ea580c' },
-  { name: 'Master Bedroom', width: 16, height: 14, color: '#8b5cf6' },
-  { name: 'Home Office / Studio', width: 12, height: 10, color: '#0284c7' },
-  { name: 'Sunroom & Garden', width: 14, height: 10, color: '#16a34a' },
-  { name: 'Bathroom & Spa', width: 8, height: 6, color: '#06b6d4' },
-  { name: 'Balcony & Terrace', width: 10, height: 5, color: '#d97706' },
+  { name: 'Hallway / Corridor', width: 3.6, height: 1.8, color: '#64748b' },
+  { name: 'Kitchen & Dining', width: 4.8, height: 3.6, color: '#ea580c' },
+  { name: 'Master Bedroom', width: 4.8, height: 4.2, color: '#8b5cf6' },
+  { name: 'Home Office / Studio', width: 3.6, height: 3, color: '#0284c7' },
+  { name: 'Sunroom & Garden', width: 4.2, height: 3, color: '#16a34a' },
+  { name: 'Bathroom & Spa', width: 2.4, height: 1.8, color: '#06b6d4' },
+  { name: 'Balcony & Terrace', width: 3, height: 1.5, color: '#d97706' },
 ];
 
 export const ConnectRoomModal: React.FC = () => {
@@ -40,8 +42,8 @@ export const ConnectRoomModal: React.FC = () => {
 
   // Form state for creating a new room
   const [newRoomName, setNewRoomName] = useState('Hallway / Corridor');
-  const [newRoomWidth, setNewRoomWidth] = useState(12);
-  const [newRoomHeight, setNewRoomHeight] = useState(8);
+  const [newRoomWidth, setNewRoomWidth] = useState(4);
+  const [newRoomHeight, setNewRoomHeight] = useState(4);
   const [newRoomColor, setNewRoomColor] = useState('#0284c7');
 
   const sourceRoomId = connectRoomDoorContext?.roomId;
@@ -73,6 +75,12 @@ export const ConnectRoomModal: React.FC = () => {
     }
   };
 
+  // Centre a door of the given width on a wall of a (rectangular) room
+  const centredOffset = (room: Pick<Room, 'gridWidth' | 'gridHeight'>, wall: string, width: number) => {
+    const wallLen = wall === 'top' || wall === 'bottom' ? room.gridWidth : room.gridHeight;
+    return roundCm(Math.max(0, (wallLen - Math.min(width, wallLen)) / 2));
+  };
+
   // Connect to an existing room
   const handleConnectExisting = async (chosenTargetRoom: Room) => {
     const targetDoors = getRoomDoors(chosenTargetRoom);
@@ -87,9 +95,9 @@ export const ConnectRoomModal: React.FC = () => {
         id: `door-${now}`,
         label: `To ${sourceRoom.name}`,
         wall: oppWall,
-        offset: 2,
+        offset: centredOffset(chosenTargetRoom, oppWall, sourceDoor.width || 0.8),
         swing: 'inward_left',
-        width: sourceDoor.width || 2,
+        width: sourceDoor.width || 0.8,
         targetRoomId: sourceRoom.id,
         targetDoorId: sourceDoor.id,
       };
@@ -156,9 +164,13 @@ export const ConnectRoomModal: React.FC = () => {
       id: reciprocalDoorId,
       label: `To ${sourceRoom.name}`,
       wall: oppWall,
-      offset: 2,
+      offset: centredOffset(
+        { gridWidth: roundCm(Math.max(0.5, Math.min(50, newRoomWidth))), gridHeight: roundCm(Math.max(0.5, Math.min(50, newRoomHeight))) },
+        oppWall,
+        sourceDoor.width || 0.8,
+      ),
       swing: 'inward_left',
-      width: sourceDoor.width || 2,
+      width: sourceDoor.width || 0.8,
       targetRoomId: sourceRoom.id,
       targetDoorId: sourceDoor.id,
     };
@@ -169,8 +181,8 @@ export const ConnectRoomModal: React.FC = () => {
       name: trimmed,
       color: newRoomColor,
       shapeType: 'rectangle',
-      gridWidth: Math.max(6, Math.min(60, newRoomWidth)),
-      gridHeight: Math.max(6, Math.min(60, newRoomHeight)),
+      gridWidth: roundCm(Math.max(0.5, Math.min(50, newRoomWidth))),
+      gridHeight: roundCm(Math.max(0.5, Math.min(50, newRoomHeight))),
       unitSize: sourceRoom.unitSize || 32,
       doors: [reciprocalDoor],
       door: reciprocalDoor,
@@ -378,28 +390,28 @@ export const ConnectRoomModal: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  <label htmlFor="connect-room-width" className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                     Width (meters)
                   </label>
-                  <input
-                    type="number"
-                    min={6}
-                    max={60}
+                  <MeterInput
+                    id="connect-room-width"
+                    min={0.5}
+                    max={50}
                     value={newRoomWidth}
-                    onChange={(e) => setNewRoomWidth(parseInt(e.target.value, 10) || 6)}
+                    onChange={setNewRoomWidth}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:border-blue-500 focus:bg-white transition-all shadow-inner font-mono"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                    Height (meters)
+                  <label htmlFor="connect-room-length" className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Length (meters)
                   </label>
-                  <input
-                    type="number"
-                    min={6}
-                    max={60}
+                  <MeterInput
+                    id="connect-room-length"
+                    min={0.5}
+                    max={50}
                     value={newRoomHeight}
-                    onChange={(e) => setNewRoomHeight(parseInt(e.target.value, 10) || 6)}
+                    onChange={setNewRoomHeight}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:border-blue-500 focus:bg-white transition-all shadow-inner font-mono"
                   />
                 </div>

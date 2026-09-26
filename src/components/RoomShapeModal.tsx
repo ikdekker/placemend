@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { MeterInput } from './MeterInput';
+import { roundCm, snapTo, formatMeters } from '../utils/measure';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
@@ -57,8 +59,8 @@ export const SHAPE_PRESETS: ShapePreset[] = [
       { id: 'tl', label: 'Corner: Top-Left' },
     ],
     generatePoints: (w, h, variation = 'br') => {
-      const cutW = Math.round(w * 0.4);
-      const cutH = Math.round(h * 0.4);
+      const cutW = snapTo(w * 0.4, 0.1);
+      const cutH = snapTo(h * 0.4, 0.1);
       if (variation === 'bl') {
         return [
           { x: 0, y: 0 },
@@ -111,8 +113,8 @@ export const SHAPE_PRESETS: ShapePreset[] = [
       { id: 'west', label: 'Wing: West' },
     ],
     generatePoints: (w, h, variation = 'south') => {
-      const side = Math.round(w * 0.25);
-      const topH = Math.round(h * 0.45);
+      const side = snapTo(w * 0.25, 0.1);
+      const topH = snapTo(h * 0.45, 0.1);
       if (variation === 'north') {
         return [
           { x: side, y: 0 },
@@ -126,8 +128,8 @@ export const SHAPE_PRESETS: ShapePreset[] = [
         ];
       }
       if (variation === 'east') {
-        const sideH = Math.round(h * 0.25);
-        const leftW = Math.round(w * 0.45);
+        const sideH = snapTo(h * 0.25, 0.1);
+        const leftW = snapTo(w * 0.45, 0.1);
         return [
           { x: 0, y: 0 },
           { x: leftW, y: 0 },
@@ -140,8 +142,8 @@ export const SHAPE_PRESETS: ShapePreset[] = [
         ];
       }
       if (variation === 'west') {
-        const sideH = Math.round(h * 0.25);
-        const rightW = Math.round(w * 0.45);
+        const sideH = snapTo(h * 0.25, 0.1);
+        const rightW = snapTo(w * 0.45, 0.1);
         return [
           { x: w - rightW, y: 0 },
           { x: w, y: 0 },
@@ -171,8 +173,8 @@ export const SHAPE_PRESETS: ShapePreset[] = [
     name: 'U-Shaped Courtyard Layout',
     description: 'Three-sided open wing layout with central cutout',
     generatePoints: (w, h) => {
-      const side = Math.round(w * 0.28);
-      const cutH = Math.round(h * 0.5);
+      const side = snapTo(w * 0.28, 0.1);
+      const cutH = snapTo(h * 0.5, 0.1);
       return [
         { x: 0, y: 0 },
         { x: w, y: 0 },
@@ -190,8 +192,8 @@ export const SHAPE_PRESETS: ShapePreset[] = [
     name: 'Studio with Bed/Desk Alcove',
     description: 'Main open living room with a dedicated inset nook',
     generatePoints: (w, h) => {
-      const nookW = Math.round(w * 0.35);
-      const nookH = Math.round(h * 0.3);
+      const nookW = snapTo(w * 0.35, 0.1);
+      const nookH = snapTo(h * 0.3, 0.1);
       return [
         { x: 0, y: 0 },
         { x: w, y: 0 },
@@ -207,7 +209,7 @@ export const SHAPE_PRESETS: ShapePreset[] = [
     name: 'Chamfered Corner / Bay Angle',
     description: 'Room with a 45-degree angled architectural wall',
     generatePoints: (w, h) => {
-      const cut = Math.round(Math.min(w, h) * 0.35);
+      const cut = snapTo(Math.min(w, h) * 0.35, 0.1);
       return [
         { x: 0, y: 0 },
         { x: w - cut, y: 0 },
@@ -219,74 +221,6 @@ export const SHAPE_PRESETS: ShapePreset[] = [
   },
 ];
 
-interface NumberInputProps {
-  value: number;
-  onChange: (val: number) => void;
-  min?: number;
-  max?: number;
-  className?: string;
-  placeholder?: string;
-}
-
-const NumberInput: React.FC<NumberInputProps> = ({
-  value,
-  onChange,
-  min = 0,
-  max = 200,
-  className = '',
-  placeholder = '',
-}) => {
-  const [localStr, setLocalStr] = useState<string>(String(value ?? 0));
-  const [isFocused, setIsFocused] = useState(false);
-
-  useEffect(() => {
-    if (!isFocused) {
-      setLocalStr(String(value ?? 0));
-    }
-  }, [value, isFocused]);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value;
-    if (raw === '' || /^\d+$/.test(raw)) {
-      setLocalStr(raw);
-      if (raw !== '') {
-        const num = parseInt(raw, 10);
-        if (!isNaN(num)) {
-          onChange(Math.max(min, Math.min(max, num)));
-        }
-      }
-    }
-  };
-
-  const handleBlur = () => {
-    setIsFocused(false);
-    let num = parseInt(localStr, 10);
-    if (isNaN(num) || num < min) {
-      num = min;
-    } else if (num > max) {
-      num = max;
-    }
-    setLocalStr(String(num));
-    onChange(num);
-  };
-
-  return (
-    <input
-      type="text"
-      inputMode="numeric"
-      pattern="[0-9]*"
-      value={localStr}
-      onChange={handleChange}
-      onFocus={(e) => {
-        setIsFocused(true);
-        e.target.select();
-      }}
-      onBlur={handleBlur}
-      placeholder={placeholder}
-      className={className}
-    />
-  );
-};
 
 const scalePointsProportionally = (
   points: Point2D[],
@@ -299,8 +233,8 @@ const scalePointsProportionally = (
   const ratioX = toW / fromW;
   const ratioY = toH / fromH;
   return points.map((p) => ({
-    x: Math.round(p.x * ratioX),
-    y: Math.round(p.y * ratioY),
+    x: roundCm(p.x * ratioX),
+    y: roundCm(p.y * ratioY),
   }));
 };
 
@@ -315,8 +249,8 @@ const scalePointsToFitBox = (points: Point2D[], targetW: number, targetH: number
   if (spanX <= 0 || spanY <= 0) return points;
 
   return points.map((p) => ({
-    x: Math.round(((p.x - minX) / spanX) * targetW),
-    y: Math.round(((p.y - minY) / spanY) * targetH),
+    x: roundCm(((p.x - minX) / spanX) * targetW),
+    y: roundCm(((p.y - minY) / spanY) * targetH),
   }));
 };
 
@@ -599,8 +533,8 @@ export const RoomShapeModal: React.FC = () => {
     const limitX = Math.max(boundaryWidth, ...(customPoints.length > 0 ? customPoints.map((p) => p.x) : [boundaryWidth]));
     const limitY = Math.max(boundaryHeight, ...(customPoints.length > 0 ? customPoints.map((p) => p.y) : [boundaryHeight]));
     return {
-      x: Math.max(0, Math.min(limitX, Math.round(transformed.x))),
-      y: Math.max(0, Math.min(limitY, Math.round(transformed.y))),
+      x: Math.max(0, Math.min(limitX, snapTo(transformed.x, 0.1))),
+      y: Math.max(0, Math.min(limitY, snapTo(transformed.y, 0.1))),
     };
   };
 
@@ -680,7 +614,10 @@ export const RoomShapeModal: React.FC = () => {
         setIsStageFullscreen(false);
         return;
       }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedCornerIdx !== null) {
+      // Backspace while typing in a field (e.g. this corner's X/Y) must edit the text, not delete the corner
+      const tag = (e.target as HTMLElement)?.tagName;
+      const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedCornerIdx !== null && !isTyping) {
         if (customPoints.length > 3) {
           e.preventDefault();
           handleDeleteCustomPoint(selectedCornerIdx);
@@ -788,8 +725,8 @@ export const RoomShapeModal: React.FC = () => {
     let t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / lenSq;
     // Keep it slightly inset from vertices so it creates a distinct corner
     t = Math.max(0.1, Math.min(0.9, t));
-    const projX = Math.round(a.x + t * abx);
-    const projY = Math.round(a.y + t * aby);
+    const projX = snapTo(a.x + t * abx, 0.1);
+    const projY = snapTo(a.y + t * aby, 0.1);
     return {
       x: Math.max(0, Math.min(boundaryWidth, projX)),
       y: Math.max(0, Math.min(boundaryHeight, projY)),
@@ -812,8 +749,8 @@ export const RoomShapeModal: React.FC = () => {
       newPt = projectPointOntoSegment(clickCoords, p1, p2);
     } else {
       newPt = {
-        x: Math.round((p1.x + p2.x) / 2),
-        y: Math.round((p1.y + p2.y) / 2),
+        x: snapTo((p1.x + p2.x) / 2, 0.1),
+        y: snapTo((p1.y + p2.y) / 2, 0.1),
       };
     }
 
@@ -825,8 +762,8 @@ export const RoomShapeModal: React.FC = () => {
       const nx = -dy / len;
       const ny = dx / len;
       newPt = {
-        x: Math.max(0, Math.min(boundaryWidth, Math.round((p1.x + p2.x) / 2 + nx))),
-        y: Math.max(0, Math.min(boundaryHeight, Math.round((p1.y + p2.y) / 2 + ny))),
+        x: Math.max(0, Math.min(boundaryWidth, snapTo((p1.x + p2.x) / 2 + nx, 0.1))),
+        y: Math.max(0, Math.min(boundaryHeight, snapTo((p1.y + p2.y) / 2 + ny, 0.1))),
       };
     }
 
@@ -923,7 +860,7 @@ export const RoomShapeModal: React.FC = () => {
       label: newIndex === 1 ? 'Main Entrance' : `Door ${newIndex}`,
       wall: chosenWall,
       segmentIndex: preferredSegment,
-      offset: Math.max(0, Math.floor((wallLen - doorWidth) / 2)),
+      offset: Math.max(0, roundCm((wallLen - doorWidth) / 2)),
       swing: 'inward_left',
       width: doorWidth,
     };
@@ -950,7 +887,7 @@ export const RoomShapeModal: React.FC = () => {
     ? selectedDoorSeg.length
     : (selectedDoor?.wall === 'top' || selectedDoor?.wall === 'bottom' ? room.gridWidth : room.gridHeight);
   const maxDoorOffset = selectedDoor
-    ? Math.max(0, Math.floor(currentSegLen - (selectedDoor.width || 2)))
+    ? Math.max(0, roundCm(currentSegLen - (selectedDoor.width || 2)))
     : 0;
 
   return (
@@ -1348,7 +1285,7 @@ export const RoomShapeModal: React.FC = () => {
                         {/* 2. Wall Length Dimension Badges (Offset cleanly away from the 50% midpoint '+' handle) */}
                         {customPoints.map((p1, idx) => {
                           const p2 = customPoints[(idx + 1) % customPoints.length];
-                          const wallLen = Math.round(Math.hypot(p2.x - p1.x, p2.y - p1.y));
+                          const wallLen = roundCm(Math.hypot(p2.x - p1.x, p2.y - p1.y));
                           if (wallLen <= 0) return null;
 
                           // Position at 25% of the wall so it never overlaps the '+' button at 50%
@@ -1613,10 +1550,10 @@ export const RoomShapeModal: React.FC = () => {
                             <div className="flex items-center gap-2">
                               <div className="flex items-center gap-1 bg-slate-800 px-2 py-1 rounded-lg border border-slate-700 flex-1">
                                 <span className="text-slate-400 text-[10px] font-bold">W:</span>
-                                <NumberInput
+                                <MeterInput
                                   value={boundaryWidth}
                                   onChange={handleUpdateBoundaryWidth}
-                                  min={3}
+                                  min={0.5}
                                   max={200}
                                   className="w-10 text-center font-bold text-xs text-white focus:outline-none bg-transparent font-mono"
                                 />
@@ -1625,10 +1562,10 @@ export const RoomShapeModal: React.FC = () => {
                               <span className="text-slate-500 text-xs">×</span>
                               <div className="flex items-center gap-1 bg-slate-800 px-2 py-1 rounded-lg border border-slate-700 flex-1">
                                 <span className="text-slate-400 text-[10px] font-bold">H:</span>
-                                <NumberInput
+                                <MeterInput
                                   value={boundaryHeight}
                                   onChange={handleUpdateBoundaryHeight}
-                                  min={3}
+                                  min={0.5}
                                   max={200}
                                   className="w-10 text-center font-bold text-xs text-white focus:outline-none bg-transparent font-mono"
                                 />
@@ -1668,7 +1605,7 @@ export const RoomShapeModal: React.FC = () => {
                                 </span>
                                 <div className="flex items-center gap-1 bg-slate-900 px-2 py-0.5 rounded-lg border border-slate-700 flex-1">
                                   <span className="text-slate-400 text-[10px]">X:</span>
-                                  <NumberInput
+                                  <MeterInput
                                     value={customPoints[selectedCornerIdx].x}
                                     min={0}
                                     max={Math.max(200, boundaryWidth)}
@@ -1678,7 +1615,7 @@ export const RoomShapeModal: React.FC = () => {
                                 </div>
                                 <div className="flex items-center gap-1 bg-slate-900 px-2 py-0.5 rounded-lg border border-slate-700 flex-1">
                                   <span className="text-slate-400 text-[10px]">Y:</span>
-                                  <NumberInput
+                                  <MeterInput
                                     value={customPoints[selectedCornerIdx].y}
                                     min={0}
                                     max={Math.max(200, boundaryHeight)}
@@ -1759,10 +1696,10 @@ export const RoomShapeModal: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <div className="flex items-center gap-1 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-xs flex-1">
                       <span className="text-slate-400 text-[10px] font-bold">W:</span>
-                      <NumberInput
+                      <MeterInput
                         value={boundaryWidth}
                         onChange={handleUpdateBoundaryWidth}
-                        min={3}
+                        min={0.5}
                         max={200}
                         className="w-12 text-center font-bold text-sm text-slate-800 focus:outline-none bg-transparent font-mono"
                       />
@@ -1771,10 +1708,10 @@ export const RoomShapeModal: React.FC = () => {
                     <span className="text-slate-300 text-xs font-bold">×</span>
                     <div className="flex items-center gap-1 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-xs flex-1">
                       <span className="text-slate-400 text-[10px] font-bold">H:</span>
-                      <NumberInput
+                      <MeterInput
                         value={boundaryHeight}
                         onChange={handleUpdateBoundaryHeight}
-                        min={3}
+                        min={0.5}
                         max={200}
                         className="w-12 text-center font-bold text-sm text-slate-800 focus:outline-none bg-transparent font-mono"
                       />
@@ -1900,7 +1837,7 @@ export const RoomShapeModal: React.FC = () => {
                         <div className="flex items-center gap-1.5 font-mono font-bold flex-wrap justify-end" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center gap-1 bg-slate-50 px-2 py-1 rounded-lg border border-slate-200 shadow-xs">
                             <span className="text-slate-400 text-[10px]">X:</span>
-                            <NumberInput
+                            <MeterInput
                               value={p.x}
                               min={0}
                               max={Math.max(200, boundaryWidth)}
@@ -1910,7 +1847,7 @@ export const RoomShapeModal: React.FC = () => {
                           </div>
                           <div className="flex items-center gap-1 bg-slate-50 px-2 py-1 rounded-lg border border-slate-200 shadow-xs">
                             <span className="text-slate-400 text-[10px]">Y:</span>
-                            <NumberInput
+                            <MeterInput
                               value={p.y}
                               min={0}
                               max={Math.max(200, boundaryHeight)}
@@ -2212,7 +2149,7 @@ export const RoomShapeModal: React.FC = () => {
                                 key={`seg-line-${seg.index}`}
                                 onClick={() => {
                                   const curWidth = selectedDoor.width || 2;
-                                  const maxOff = Math.max(0, Math.floor(seg.length - curWidth));
+                                  const maxOff = Math.max(0, roundCm(seg.length - curWidth));
                                   const newOffset = Math.min(selectedDoor.offset, maxOff);
                                   updateSelectedDoor({
                                     wall: seg.wallSide || (seg.isSlanted ? `slanted-${seg.index}` : seg.id),
@@ -2331,19 +2268,19 @@ export const RoomShapeModal: React.FC = () => {
                     <div className="flex items-center justify-between text-xs font-bold mb-1.5">
                       <span className="text-slate-700">1. Door Opening Width</span>
                       <span className="font-mono text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">
-                        {selectedDoor.width || 2}m width
+                        {formatMeters(selectedDoor.width || 0.8)} wide
                       </span>
                     </div>
                     <div className="grid grid-cols-3 gap-2">
                       {[
-                        { w: 1, title: 'Single Door', sub: '1m / 3.3ft' },
-                        { w: 2, title: 'Wide Entry', sub: '2m / 6.6ft' },
-                        { w: 3, title: 'Double Doors', sub: '3m / 10ft' },
+                        { w: 0.8, title: 'Standard', sub: '80 cm' },
+                        { w: 0.9, title: 'Wide', sub: '90 cm' },
+                        { w: 1.6, title: 'Double', sub: '160 cm' },
                       ].map((item) => (
                         <button
                           key={item.w}
                           onClick={() => {
-                            const newOffset = selectedDoor.offset + item.w > currentSegLen ? Math.max(0, currentSegLen - item.w) : selectedDoor.offset;
+                            const newOffset = selectedDoor.offset + item.w > currentSegLen ? Math.max(0, roundCm(currentSegLen - item.w)) : selectedDoor.offset;
                             updateSelectedDoor({ width: item.w, offset: newOffset });
                           }}
                           className={`py-2 px-2 rounded-xl text-center cursor-pointer transition-all ${
@@ -2359,6 +2296,21 @@ export const RoomShapeModal: React.FC = () => {
                         </button>
                       ))}
                     </div>
+                    <label className="mt-2 flex items-center gap-2 text-xs font-bold text-slate-600">
+                      <span>Exact width</span>
+                      <MeterInput
+                        aria-label="Exact door width in meters"
+                        value={selectedDoor.width || 0.8}
+                        min={0.4}
+                        max={Math.max(0.4, currentSegLen)}
+                        onChange={(w) => {
+                          const newOffset = selectedDoor.offset + w > currentSegLen ? Math.max(0, roundCm(currentSegLen - w)) : selectedDoor.offset;
+                          updateSelectedDoor({ width: w, offset: newOffset });
+                        }}
+                        className="w-20 bg-white text-slate-900 text-xs px-2 py-1.5 rounded-lg border border-slate-300 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <span className="text-slate-400 font-medium">m</span>
+                    </label>
                   </div>
 
                   {/* 2. Wall Selection (All Segments, including Slanted Walls) */}
@@ -2376,7 +2328,7 @@ export const RoomShapeModal: React.FC = () => {
                             key={seg.index}
                             onClick={() => {
                               const curWidth = selectedDoor.width || 2;
-                              const maxOff = Math.max(0, Math.floor(seg.length - curWidth));
+                              const maxOff = Math.max(0, roundCm(seg.length - curWidth));
                               const newOffset = Math.min(selectedDoor.offset, maxOff);
                               updateSelectedDoor({
                                 wall: seg.wallSide || (seg.isSlanted ? `slanted-${seg.index}` : seg.id),
@@ -2392,7 +2344,7 @@ export const RoomShapeModal: React.FC = () => {
                           >
                             <div className="truncate">{seg.label}</div>
                             <div className={`text-[10px] font-normal ${isSelected ? 'text-blue-100' : 'text-slate-400'}`}>
-                              {seg.length.toFixed(1)}m long {seg.isSlanted ? '• Slanted' : ''}
+                              {formatMeters(seg.length)} long {seg.isSlanted ? '• Slanted' : ''}
                             </div>
                           </button>
                         );
@@ -2405,46 +2357,59 @@ export const RoomShapeModal: React.FC = () => {
                     <div className="flex items-center justify-between text-xs font-bold mb-1.5">
                       <span className="text-slate-700">3. Distance from Wall Corner</span>
                       <span className="font-mono text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">
-                        {selectedDoor.offset}m from corner
+                        {formatMeters(selectedDoor.offset)} from corner
                       </span>
                     </div>
 
                     {/* Quick Presets */}
                     <div className="flex gap-1.5 mb-2">
                       <button
-                        onClick={() => updateSelectedDoor({ offset: Math.min(1, maxDoorOffset) })}
+                        onClick={() => updateSelectedDoor({ offset: 0 })}
                         className="flex-1 py-1 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-bold text-slate-600 cursor-pointer"
                       >
-                        Start (1m)
+                        At corner
                       </button>
                       <button
-                        onClick={() => updateSelectedDoor({ offset: Math.round(maxDoorOffset / 2) })}
+                        onClick={() => updateSelectedDoor({ offset: roundCm(maxDoorOffset / 2) })}
                         className="flex-1 py-1 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-bold text-slate-600 cursor-pointer"
                       >
-                        Centered ({Math.round(maxDoorOffset / 2)}m)
+                        Centered
                       </button>
                       <button
-                        onClick={() => updateSelectedDoor({ offset: Math.max(0, maxDoorOffset - 1) })}
+                        onClick={() => updateSelectedDoor({ offset: maxDoorOffset })}
                         className="flex-1 py-1 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-bold text-slate-600 cursor-pointer"
                       >
-                        End ({Math.max(0, maxDoorOffset - 1)}m)
+                        Other end
                       </button>
                     </div>
 
+                    <label className="mb-2 flex items-center gap-2 text-xs font-bold text-slate-600">
+                      <span>Distance from corner</span>
+                      <MeterInput
+                        aria-label="Door distance from wall corner in meters"
+                        value={selectedDoor.offset}
+                        min={0}
+                        max={maxDoorOffset}
+                        onChange={(offset) => updateSelectedDoor({ offset })}
+                        className="w-20 bg-white text-slate-900 text-xs px-2 py-1.5 rounded-lg border border-slate-300 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <span className="text-slate-400 font-medium">m</span>
+                    </label>
                     <input
                       type="range"
                       min={0}
                       max={maxDoorOffset}
+                      step={0.05}
                       value={selectedDoor.offset}
-                      onChange={(e) => updateSelectedDoor({ offset: parseInt(e.target.value, 10) || 0 })}
+                      onChange={(e) => updateSelectedDoor({ offset: roundCm(parseFloat(e.target.value) || 0) })}
                       className="w-full accent-blue-600 cursor-pointer"
                     />
                     <div className="flex justify-between text-[10px] font-bold text-slate-400 font-mono mt-1">
-                      <span>0m (corner)</span>
+                      <span>corner</span>
                       <span className="text-slate-500 font-medium">
-                        Spans {selectedDoor.offset}m to {selectedDoor.offset + (selectedDoor.width || 2)}m
+                        Spans {formatMeters(selectedDoor.offset)} to {formatMeters(selectedDoor.offset + (selectedDoor.width || 0.8))}
                       </span>
-                      <span>{maxDoorOffset}m</span>
+                      <span>{formatMeters(maxDoorOffset)}</span>
                     </div>
                   </div>
 

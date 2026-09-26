@@ -16,6 +16,8 @@ interface FurnitureGraphicProps {
   showLabels?: boolean;
   showDimensions?: boolean;
   dimensionText?: string;
+  /** 1/zoom: keeps the name/dimension badge a constant size on screen */
+  labelScale?: number;
 }
 
 export const FurnitureGraphic: React.FC<FurnitureGraphicProps> = ({
@@ -32,6 +34,7 @@ export const FurnitureGraphic: React.FC<FurnitureGraphicProps> = ({
   showLabels = true,
   showDimensions = false,
   dimensionText,
+  labelScale = 1,
 }) => {
   // Auto-detect shape if not explicitly set (e.g. Round Dining Table or Sectional L-Couch by name)
   const effectiveShape: FurnitureShape = shape !== 'rectangle'
@@ -215,10 +218,14 @@ export const FurnitureGraphic: React.FC<FurnitureGraphicProps> = ({
       {(showLabels || showDimensions) && (
         <div
           className={`absolute z-10 pointer-events-none flex flex-col items-center justify-center gap-0.5 w-max max-w-[max(94%,140px)] px-1 ${
-            height > width * 1.25
-              ? 'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2'
-              : 'bottom-1.5 left-1/2 -translate-x-1/2'
+            height > width * 1.25 ? 'top-1/2 left-1/2' : 'bottom-1.5 left-1/2'
           }`}
+          style={{
+            transform: height > width * 1.25
+              ? `translate(-50%, -50%) scale(${labelScale})`
+              : `translateX(-50%) scale(${labelScale})`,
+            transformOrigin: height > width * 1.25 ? 'center' : 'bottom center',
+          }}
         >
           {showLabels && (
             <div

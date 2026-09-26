@@ -78,13 +78,31 @@ export interface AppState {
   locateFurniture: (roomId: string, furnitureId: string, containerId?: string | null) => void;
 }
 
+const ROOM_KEY = 'placemend_selected_room';
+function readStoredRoomId(): string | null {
+  try {
+    return localStorage.getItem(ROOM_KEY);
+  } catch {
+    return null;
+  }
+}
+function storeRoomId(id: string | null): void {
+  try {
+    if (id) localStorage.setItem(ROOM_KEY, id);
+    else localStorage.removeItem(ROOM_KEY);
+  } catch {
+    // storage unavailable: selection just isn't remembered
+  }
+}
+
 export const useAppStore = create<AppState>((set) => ({
   appMode: 'view', // default clean view/search mode
   setAppMode: (mode) => set({ appMode: mode }),
   toggleAppMode: () => set((s) => ({ appMode: s.appMode === 'view' ? 'edit' : 'view' })),
 
   selectedLocationId: 'loc-home',
-  selectedRoomId: 'room-living',
+  // Remember the last opened room across reloads (falls back to the first room if it no longer exists)
+  selectedRoomId: readStoredRoomId() ?? 'room-living',
   selectedFurnitureId: null,
   selectedContainerId: null,
   highlightedFurnitureId: null,
@@ -122,13 +140,15 @@ export const useAppStore = create<AppState>((set) => ({
   searchQuery: '',
 
   setSelectedLocationId: (id) => set({ selectedLocationId: id }),
-  setSelectedRoomId: (id) =>
+  setSelectedRoomId: (id) => {
+    storeRoomId(id);
     set((s) => ({
       selectedRoomId: id,
       selectedFurnitureId: null,
       selectedContainerId: null,
       fitViewTrigger: s.fitViewTrigger + 1,
-    })),
+    }));
+  },
   setSelectedFurnitureId: (id) => set({ selectedFurnitureId: id, selectedContainerId: null }),
   setSelectedContainerId: (id) => set({ selectedContainerId: id }),
   setHighlightedFurnitureId: (id) => set({ highlightedFurnitureId: id }),
@@ -165,6 +185,7 @@ export const useAppStore = create<AppState>((set) => ({
   clearSearch: () => set({ searchQuery: '', isSearchOpen: false }),
 
   locateFurniture: (roomId, furnitureId, containerId = null) => {
+    storeRoomId(roomId);
     set({
       selectedRoomId: roomId,
       selectedFurnitureId: furnitureId,

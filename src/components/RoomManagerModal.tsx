@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
+import { MeterInput } from './MeterInput';
+import { roundCm, formatMeters } from '../utils/measure';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
 import { Room } from '../types';
-import { X, Plus, Trash2, MapPin, Grid, Edit3, Check, Download } from 'lucide-react';
+import { X, Plus, Trash2, MapPin, Grid, Edit3, Check } from 'lucide-react';
 import { isAutoSyncEnabled, pushLocalToRemote } from '../services/apiSync';
 import { scheduleSeedIfEmpty } from '../db/sampleData';
 
@@ -14,7 +16,6 @@ export const RoomManagerModal: React.FC = () => {
     selectedLocationId,
     selectedRoomId,
     setSelectedRoomId,
-    setBackupModalOpen,
   } = useAppStore();
 
   const [name, setName] = useState('');
@@ -41,8 +42,8 @@ export const RoomManagerModal: React.FC = () => {
     e.preventDefault();
     if (!name.trim()) return;
 
-    const width = Math.max(2, Math.min(50, gridWidth));
-    const length = Math.max(2, Math.min(50, gridHeight));
+    const width = roundCm(Math.max(0.5, Math.min(50, gridWidth)));
+    const length = roundCm(Math.max(0.5, Math.min(50, gridHeight)));
     const newRoom: Room = {
       id: `room-${Date.now()}`,
       locationId: selectedLocationId || 'loc-home',
@@ -54,9 +55,9 @@ export const RoomManagerModal: React.FC = () => {
           id: `door-${Date.now()}`,
           label: 'Main Entrance',
           wall: 'bottom',
-          offset: Math.max(0, Math.floor((width - 1) / 2)),
+          offset: roundCm(Math.max(0, (width - Math.min(0.8, width)) / 2)),
           swing: 'inward_left',
-          width: 1,
+          width: Math.min(0.8, width),
         },
       ],
       gridWidth: width,
@@ -197,7 +198,7 @@ export const RoomManagerModal: React.FC = () => {
                       <div className="min-w-0 flex-1">
                         <h5 className="font-bold text-xs sm:text-sm text-slate-900 truncate">{room.name}</h5>
                         <p className="text-[11px] text-slate-500 font-mono">
-                          {room.gridWidth}m × {room.gridHeight}m
+                          {formatMeters(room.gridWidth)} × {formatMeters(room.gridHeight)}
                         </p>
                       </div>
                     )}
@@ -260,28 +261,28 @@ export const RoomManagerModal: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                  <label htmlFor="new-room-width" className="block text-xs font-bold text-slate-700 mb-1">
                     Width (meters)
                   </label>
-                  <input
-                    type="number"
-                    min={2}
+                  <MeterInput
+                    id="new-room-width"
+                    min={0.5}
                     max={50}
                     value={gridWidth}
-                    onChange={(e) => setGridWidth(parseInt(e.target.value, 10) || 20)}
+                    onChange={setGridWidth}
                     className="w-full bg-white text-slate-900 text-xs px-3 py-2 rounded-xl border border-slate-300 font-mono shadow-xs focus:outline-none focus:border-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                  <label htmlFor="new-room-length" className="block text-xs font-bold text-slate-700 mb-1">
                     Length (meters)
                   </label>
-                  <input
-                    type="number"
-                    min={2}
+                  <MeterInput
+                    id="new-room-length"
+                    min={0.5}
                     max={50}
                     value={gridHeight}
-                    onChange={(e) => setGridHeight(parseInt(e.target.value, 10) || 16)}
+                    onChange={setGridHeight}
                     className="w-full bg-white text-slate-900 text-xs px-3 py-2 rounded-xl border border-slate-300 font-mono shadow-xs focus:outline-none focus:border-blue-500"
                   />
                 </div>
@@ -297,20 +298,6 @@ export const RoomManagerModal: React.FC = () => {
             </form>
           </div>
 
-          {/* Data Backup & Export Section */}
-          <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() => {
-                setRoomManagerOpen(false);
-                setBackupModalOpen(true);
-              }}
-              className="w-full py-2.5 px-3 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
-            >
-              <Download className="w-4 h-4 text-slate-500" />
-              <span>Backup & Export All Data (JSON)</span>
-            </button>
-          </div>
         </div>
       </div>
     </div>
