@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
-import { Furniture, FurnitureType, FurnitureShape } from '../types';
+import { Container, Furniture, FurnitureType, FurnitureShape } from '../types';
 import { scheduleAutoSync } from '../services/apiSync';
 import { reportClientError } from '../services/errorReport';
 import { inferContainerType } from '../utils/containerKind';
@@ -581,15 +581,32 @@ export const FurnitureLibrary: React.FC = () => {
       updatedAt: Date.now(),
     };
 
-    const containers = tmpl.defaultContainers.map((name, idx) => ({
+    // Wardrobes and closets are doors with the storage behind them, not loose compartments
+    const behindDoor = tmpl.type === 'wardrobe' || tmpl.type === 'closet';
+    const doorId = `cont-${Date.now()}-door`;
+    const containers: Container[] = tmpl.defaultContainers.map((name, idx) => ({
       id: `cont-${Date.now()}-${idx}`,
       furnitureId: newFurnitureId,
       name,
       type: inferContainerType(name),
       orderIndex: idx,
+      ...(behindDoor ? { parentContainerId: doorId } : {}),
       createdAt: Date.now(),
       updatedAt: Date.now(),
     }));
+    if (behindDoor) {
+      containers.unshift({
+        id: doorId,
+        furnitureId: newFurnitureId,
+        name: 'Doors',
+        type: 'cabinet_door',
+        doorCount: 2,
+        columnIndex: 0,
+        orderIndex: 0,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    }
 
     progress.step = 'save-to-database';
     await db.transaction('rw', [db.furniture, db.containers], async () => {
