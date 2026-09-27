@@ -21,11 +21,20 @@ interface Props {
   onMove: (dx: number, dy: number) => void;
   onDelete: () => void;
   onClose: () => void;
+  /** Doors only: number of door leaves (2 = a pair sharing one interior) */
+  doorCount?: number;
+  onChangeDoorCount?: (n: number) => void;
+  /** Front compartments only: relative width of the column it is in */
+  columnWidth?: number;
+  onChangeColumnWidth?: (w: number) => void;
+  /** Doors only: open the door to add shelves, rails and drawers behind it */
+  onEditInside?: () => void;
 }
 
 /** Bottom sheet for one compartment while editing a furniture layout */
 export const CompartmentEditSheet: React.FC<Props> = ({
   container, kind, itemCount, canMove, onRename, onChangeType, onMove, onDelete, onClose,
+  doorCount, onChangeDoorCount, columnWidth, onChangeColumnWidth, onEditInside,
 }) => {
   const [name, setName] = useState(container.name);
   useEffect(() => setName(container.name), [container.id, container.name]);
@@ -94,6 +103,54 @@ export const CompartmentEditSheet: React.FC<Props> = ({
             ))}
           </div>
         </div>
+
+        {doorCount !== undefined && onChangeDoorCount && (
+          <div>
+            <span className="block text-xs font-bold text-slate-600 mb-1.5">Doors</span>
+            <div className="grid grid-cols-2 gap-2">
+              {[1, 2].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => onChangeDoorCount(n)}
+                  aria-pressed={doorCount === n}
+                  className={`py-2.5 rounded-xl text-xs font-bold cursor-pointer ${doorCount === n ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                >
+                  {n === 1 ? 'Single door' : 'Pair of doors'}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {columnWidth !== undefined && onChangeColumnWidth && kind !== 'top_surface' && (
+          <div>
+            <span className="block text-xs font-bold text-slate-600 mb-1.5">Column width</span>
+            <div className="grid grid-cols-2 gap-2">
+              {[1, 2].map((w) => (
+                <button
+                  key={w}
+                  type="button"
+                  onClick={() => onChangeColumnWidth(w)}
+                  aria-pressed={columnWidth === w}
+                  className={`py-2.5 rounded-xl text-xs font-bold cursor-pointer ${columnWidth === w ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                >
+                  {w === 1 ? 'Normal' : 'Double width'}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {onEditInside && (
+          <button
+            type="button"
+            onClick={onEditInside}
+            className="w-full py-3 rounded-xl bg-slate-900 text-white text-sm font-bold hover:bg-slate-800 cursor-pointer"
+          >
+            Edit what's behind this door
+          </button>
+        )}
 
         {kind !== 'top_surface' && (
           <div>

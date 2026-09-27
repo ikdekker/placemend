@@ -41,6 +41,10 @@ export const PhysicalFurnitureView: React.FC = () => {
   const [isComposing, setIsComposing] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
+  // A door opened in place: its column shows what's behind it
+  const [openDoorId, setOpenDoorId] = useState<string | null>(null);
+  // Scan scoped to one compartment (e.g. the open door); null = whole furniture
+  const [scanRootId, setScanRootId] = useState<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
   const furniture = useLiveQuery(async () => {
@@ -145,7 +149,8 @@ export const PhysicalFurnitureView: React.FC = () => {
   // Leaving edit mode: drop empty columns so the front doesn't keep blank gaps
   const compactLayout = async () => {
     const nonEmpty = facadeColumns.filter((col) => col.length > 0);
-    await db.furniture.update(furniture.id, { columns: Math.max(1, nonEmpty.length), updatedAt: Date.now() });
+    const keptWidths = facadeColumns.map((_, i) => columnWidth(i)).filter((_, i) => facadeColumns[i].length > 0);
+    await db.furniture.update(furniture.id, { columns: Math.max(1, nonEmpty.length), columnWidths: keptWidths, updatedAt: Date.now() });
     for (let col = 0; col < nonEmpty.length; col++) {
       for (let i = 0; i < nonEmpty[col].length; i++) {
         const c = nonEmpty[col][i];
@@ -247,16 +252,130 @@ export const PhysicalFurnitureView: React.FC = () => {
       <span>{label}</span>
     </button>
   );
-  const editColumnCount = facadeColumns.length;
 
-  const renderSlot = (container: Container, stackSize: number, openFrame: boolean) => {
+  // Relative column widths (PAX: [1, 2, 1] for a 50/100/50 cm combination)
+  const columnWidth = (col: number) => furniture.columnWidths?.[col] || 1;
+  // An open door's column gets at least double width while open, so its interior is readable
+  const gridColumns = facadeColumns
+    .map((col, i) => {
+      const w = col.some((c) => c.id === openDoorId) ? Math.max(2, columnWidth(i)) : columnWidth(i);
+      return `minmax(0, ${w}fr)`;
+    })
+    .join(' ');
+  const setColumnWidth = async (col: number, width: number) => {
+    const widths = Array.from({ length: facadeNumColumns }, (_, i) => columnWidth(i));
+    widths[col] = width;
+    await db.furniture.update(furniture.id, { columnWidths: widths, updatedAt: Date.now() });
+    touchLayout();
+  };
+
+  // Compartments behind a door (or inside any compartment), top to bottom
+  const childrenOf = (id: string) =>
+    containers.filter((c) => c.parentContainerId === id).sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+
+  const addInside = async (parentId: string) => {
+    const now = Date.now();
+    const id = `cont-${now}`;
+    await db.containers.add({
+      id,
+      furnitureId: furniture.id,
+      parentContainerId: parentId,
+      name: 'Shelf',
+      type: 'shelf',
+      orderIndex: childrenOf(parentId).length,
+      createdAt: now,
+      updatedAt: now,
+    });
+    touchLayout();
+    setEditingSlotId(id);
+  };
+
+  const moveInside = async (container: Container, dy: number) => {
+    if (!container.parentContainerId) return;
+    const siblings = childrenOf(container.parentContainerId);
+    const idx = siblings.findIndex((c) => c.id === container.id);
+    const other = siblings[idx + dy];
+    if (!other) return;
+    const now = Date.now();
+    await db.containers.update(container.id, { orderIndex: idx + dy, updatedAt: now });
+    await db.containers.update(other.id, { orderIndex: idx, updatedAt: now });
+    touchLayout();
+  };
+
+  const tapFront = (container: Container) => {
+    if (isComposing) return setEditingSlotId(container.id);
+    // Doors with an interior open in place; everything else opens its item list
+    if (effectiveContainerType(container) === 'cabinet_door' && childrenOf(container.id).length > 0) {
+      return setOpenDoorId(openDoorId === container.id ? null : container.id);
+    }
+    setSelectedContainerId(container.id);
+  };
+
+  // An opened door: same place and size as the door, showing the interior behind it
+  const renderOpenDoor = (door: Container) => {
+    const inside = childrenOf(door.id);
+    return (
+      <div
+        key={door.id}
+        style={{ flex: '1 0 auto' }}
+        className="relative min-h-[220px] sm:min-h-[260px] rounded-2xl sm:rounded-3xl bg-slate-100 border-2 border-blue-500 shadow-inner p-2 flex flex-col gap-1 animate-in fade-in duration-150"
+      >
+        <div className="flex items-center justify-between gap-1 pb-1">
+          <span className="text-[11px] font-black text-slate-700 truncate">{cleanContainerName(door.name)}</span>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {!isComposing && (
+              <button
+                type="button"
+                onClick={() => setScanRootId(door.id)}
+                className="p-1.5 rounded-lg bg-indigo-600 text-white cursor-pointer"
+                title={`Scan ${door.name}`}
+                aria-label={`Scan ${door.name}`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setOpenDoorId(null)}
+              className="px-2 py-1 rounded-lg bg-white border border-slate-300 text-[11px] font-bold text-slate-700 cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+        {inside.map((c) => renderSlot(c, inside.length, true, true))}
+        {isComposing && (
+          <button
+            type="button"
+            onClick={() => addInside(door.id)}
+            className="w-full min-h-[44px] rounded-xl border-2 border-dashed border-blue-300 bg-blue-50/60 hover:bg-blue-100 text-blue-700 text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
+          >
+            <Plus className="w-4 h-4 stroke-[2.5]" />
+            <span>Add inside</span>
+          </button>
+        )}
+        {!isComposing && inside.length === 0 && (
+          <button type="button" onClick={() => setSelectedContainerId(door.id)} className="flex-1 text-xs font-bold text-blue-700 cursor-pointer">
+            Open items
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  const renderFront = (container: Container, stackSize: number, openFrame: boolean) =>
+    openDoorId === container.id ? renderOpenDoor(container) : renderSlot(container, stackSize, openFrame);
+
+  const renderSlot = (container: Container, stackSize: number, openFrame: boolean, compact = false) => {
     const kind = effectiveContainerType(container);
     const totalCount = containerTotal(container);
     const isMatch = isSearching && matchingContainerIds.has(container.id);
     const isDimmed = isSearching && !isMatch;
     const matchCount = matchCountsByContainer.get(container.id) || 0;
     const color = furniture.color || '#0f766e';
-    const minHeightClass = kind === 'drawer' && stackSize > 1
+    const minHeightClass = compact
+      ? 'min-h-[52px] sm:min-h-[60px]'
+      : kind === 'drawer' && stackSize > 1
       ? 'min-h-[64px] sm:min-h-[80px]'
       : stackSize === 1
       ? (openFrame ? 'min-h-[120px] sm:min-h-[150px]' : 'min-h-[180px] sm:min-h-[220px]')
@@ -277,7 +396,7 @@ export const PhysicalFurnitureView: React.FC = () => {
     return (
       <div
         key={container.id}
-        onClick={() => (isComposing ? setEditingSlotId(container.id) : setSelectedContainerId(container.id))}
+        onClick={() => tapFront(container)}
         className={`relative ${openFrame ? 'rounded-none' : 'rounded-2xl sm:rounded-3xl'} ${kind === 'drawer' ? 'p-2 sm:p-3' : 'p-3 sm:p-4'} ${
           openFrame || kind === 'shelf' ? 'pb-5 sm:pb-6' : ''
         } flex flex-col justify-between items-center text-center cursor-pointer transition-all duration-200 group active:scale-98 select-none ${minHeightClass} ${frontClass} ${
@@ -285,7 +404,7 @@ export const PhysicalFurnitureView: React.FC = () => {
         } ${isComposing ? 'outline-2 outline-dashed outline-blue-400 outline-offset-2' : ''}`}
         title={container.name}
         // Doors are taller than drawers when they share a column, like on real fronts
-        style={{ flexGrow: kind === 'cabinet_door' ? 2 : kind === 'drawer' ? 1 : 1.5, flexBasis: 0 }}
+        style={compact ? undefined : { flexGrow: kind === 'cabinet_door' ? 2 : kind === 'drawer' ? 1 : 1.5, flexBasis: 0 }}
       >
         {/* Count / match pip */}
         <div className="w-full flex items-center justify-end pointer-events-none">
@@ -304,6 +423,12 @@ export const PhysicalFurnitureView: React.FC = () => {
         <div className={`my-auto ${kind === 'drawer' ? 'py-1' : 'py-2'} flex items-center justify-center pointer-events-none w-full`}>
           {kind === 'drawer' ? (
             <div className="w-16 sm:w-24 h-3.5 sm:h-4 rounded-full shadow-md border-2 bg-gradient-to-r from-slate-300 via-white to-slate-300 border-slate-400/60 group-hover:border-blue-400" />
+          ) : kind === 'cabinet_door' && (container.doorCount || 1) >= 2 ? (
+            <>
+              <div className="absolute top-2 bottom-2 left-1/2 w-0.5 -translate-x-1/2 bg-slate-300" />
+              <div className="absolute left-1/2 top-1/2 -translate-y-1/2 -translate-x-[calc(100%+6px)] w-2.5 h-12 sm:h-16 rounded-full shadow-md border-2 bg-gradient-to-b from-slate-300 via-white to-slate-300 border-slate-400/60 group-hover:border-blue-400" />
+              <div className="absolute left-1/2 top-1/2 -translate-y-1/2 translate-x-[6px] w-2.5 h-12 sm:h-16 rounded-full shadow-md border-2 bg-gradient-to-b from-slate-300 via-white to-slate-300 border-slate-400/60 group-hover:border-blue-400" />
+            </>
           ) : kind === 'cabinet_door' ? (
             <div className="absolute right-3 top-1/2 -translate-y-1/2 w-2.5 h-12 sm:h-16 rounded-full shadow-md border-2 bg-gradient-to-b from-slate-300 via-white to-slate-300 border-slate-400/60 group-hover:border-blue-400" />
           ) : kind === 'box' || kind === 'bin' ? (
@@ -319,7 +444,7 @@ export const PhysicalFurnitureView: React.FC = () => {
         </span>
 
         {/* Shelves are planks: draw the board they stand on */}
-        {(openFrame || kind === 'shelf') && (
+        {(kind === 'shelf' || (openFrame && !compact)) && (
           <div
             style={{ backgroundColor: color }}
             className="absolute left-0 right-0 bottom-0 h-2.5 sm:h-3 rounded-sm shadow-md pointer-events-none"
@@ -332,24 +457,47 @@ export const PhysicalFurnitureView: React.FC = () => {
   return (
     <div className="flex-1 min-h-0 w-full bg-slate-100 flex flex-col overflow-hidden animate-in fade-in duration-150">
       {isScanning && <ScanItemsModal furnitureId={furniture.id} onClose={() => setIsScanning(false)} />}
-      {isComposing && editingSlot && (
-        <CompartmentEditSheet
-          container={editingSlot}
-          kind={effectiveContainerType(editingSlot)}
-          itemCount={containerTotal(editingSlot)}
-          canMove={{
-            left: !!editingPos && editingPos.col > 0,
-            right: !!editingPos && editingPos.col < facadeNumColumns - 1,
-            up: !!editingPos && editingPos.row > 0,
-            down: !!editingPos && editingPos.row < facadeColumns[editingPos.col].length - 1,
-          }}
-          onRename={(name) => updateSlot(editingSlot.id, { name })}
-          onChangeType={(type) => updateSlot(editingSlot.id, { type })}
-          onMove={(dx, dy) => moveSlot(editingSlot, dx, dy)}
-          onDelete={() => deleteSlot(editingSlot.id)}
-          onClose={() => setEditingSlotId(null)}
-        />
-      )}
+      {scanRootId && <ScanItemsModal furnitureId={furniture.id} rootContainerId={scanRootId} onClose={() => setScanRootId(null)} />}
+      {isComposing && editingSlot && (() => {
+        const inside = !!editingSlot.parentContainerId;
+        const siblings = inside ? childrenOf(editingSlot.parentContainerId!) : [];
+        const sibIdx = siblings.findIndex((c) => c.id === editingSlot.id);
+        const kind = effectiveContainerType(editingSlot);
+        return (
+          <CompartmentEditSheet
+            container={editingSlot}
+            kind={kind}
+            itemCount={containerTotal(editingSlot)}
+            canMove={
+              inside
+                ? { left: false, right: false, up: sibIdx > 0, down: sibIdx >= 0 && sibIdx < siblings.length - 1 }
+                : {
+                    left: !!editingPos && editingPos.col > 0,
+                    right: !!editingPos && editingPos.col < facadeNumColumns - 1,
+                    up: !!editingPos && editingPos.row > 0,
+                    down: !!editingPos && editingPos.row < facadeColumns[editingPos.col].length - 1,
+                  }
+            }
+            onRename={(name) => updateSlot(editingSlot.id, { name })}
+            onChangeType={(type) => updateSlot(editingSlot.id, { type })}
+            onMove={(dx, dy) => (inside ? moveInside(editingSlot, dy) : moveSlot(editingSlot, dx, dy))}
+            onDelete={() => deleteSlot(editingSlot.id)}
+            onClose={() => setEditingSlotId(null)}
+            doorCount={!inside && kind === 'cabinet_door' ? editingSlot.doorCount || 1 : undefined}
+            onChangeDoorCount={(n) => updateSlot(editingSlot.id, { doorCount: n })}
+            columnWidth={!inside && editingPos ? columnWidth(editingPos.col) : undefined}
+            onChangeColumnWidth={(w) => editingPos && setColumnWidth(editingPos.col, w)}
+            onEditInside={
+              !inside && kind === 'cabinet_door'
+                ? () => {
+                    setOpenDoorId(editingSlot.id);
+                    setEditingSlotId(null);
+                  }
+                : undefined
+            }
+          />
+        );
+      })()}
       <input
         ref={photoInputRef}
         type="file"
@@ -662,11 +810,11 @@ export const PhysicalFurnitureView: React.FC = () => {
                   <div style={{ backgroundColor: furniture.color || '#0f766e' }} className="w-2.5 sm:w-3 rounded-b-md shadow-md flex-shrink-0" />
                   <div
                     className="flex-1 grid gap-x-2 sm:gap-x-4 px-2 sm:px-4"
-                    style={{ gridTemplateColumns: `repeat(${editColumnCount}, minmax(0, 1fr))` }}
+                    style={{ gridTemplateColumns: gridColumns }}
                   >
                     {facadeColumns.map((col, colIdx) => (
                       <div key={colIdx} className={`flex flex-col ${isComposing ? 'gap-3' : ''}`}>
-                        {col.map((container) => renderSlot(container, col.length, true))}
+                        {col.map((container) => renderFront(container, col.length, true))}
                         {isComposing && addTile(colIdx)}
                       </div>
                     ))}
@@ -683,11 +831,11 @@ export const PhysicalFurnitureView: React.FC = () => {
                   >
                     <div
                       className="grid gap-2.5 sm:gap-4 w-full"
-                      style={{ gridTemplateColumns: `repeat(${editColumnCount}, minmax(0, 1fr))` }}
+                      style={{ gridTemplateColumns: gridColumns }}
                     >
                       {facadeColumns.map((col, colIdx) => (
                         <div key={colIdx} className="flex flex-col gap-2.5 sm:gap-3.5 h-full">
-                          {col.map((container) => renderSlot(container, col.length, false))}
+                          {col.map((container) => renderFront(container, col.length, false))}
                           {isComposing && addTile(colIdx)}
                         </div>
                       ))}

@@ -98,6 +98,8 @@ export type Furniture = {
   mirrored?: boolean; // Flip/mirror orientation for asymmetrical furniture (e.g. L-shaped couches, corner desks)
   facadeLayout?: 'horizontal_row' | 'grid' | 'vertical_stack';
   columns?: number;
+  // Relative width per front column, e.g. [1, 2, 1] for a PAX with a 50 cm, 100 cm and 50 cm frame
+  columnWidths?: number[];
   createdAt: number;
   updatedAt: number;
 };
@@ -122,6 +124,8 @@ export type Container = {
   color?: string;
   orderIndex: number;
   columnIndex?: number;
+  // Doors: how many door leaves this front has (2 = a pair sharing one interior)
+  doorCount?: number;
   notes?: string;
   createdAt: number;
   updatedAt: number;
