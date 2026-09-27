@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { ScanItemsModal } from './ScanItemsModal';
 import { CompartmentEditSheet } from './CompartmentEditSheet';
+import { BuildLayoutModal } from './BuildLayoutModal';
 import { scheduleAutoSync } from '../services/apiSync';
 import { effectiveContainerType, isOpenKind } from '../utils/containerKind';
 
@@ -45,6 +46,7 @@ export const PhysicalFurnitureView: React.FC = () => {
   const [openDoorId, setOpenDoorId] = useState<string | null>(null);
   // Scan scoped to one compartment (e.g. the open door); null = whole furniture
   const [scanRootId, setScanRootId] = useState<string | null>(null);
+  const [isBuildingLayout, setIsBuildingLayout] = useState(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
   const furniture = useLiveQuery(async () => {
@@ -253,6 +255,10 @@ export const PhysicalFurnitureView: React.FC = () => {
     </button>
   );
 
+  // Tall furniture is drawn tall, so a wardrobe doesn't look like a sideboard
+  const isTall = ['wardrobe', 'closet', 'bookshelf', 'storage_rack'].includes(furniture.type);
+  const tallMinHeight = isTall ? '58vh' : undefined;
+
   // Relative column widths (PAX: [1, 2, 1] for a 50/100/50 cm combination)
   const columnWidth = (col: number) => furniture.columnWidths?.[col] || 1;
   // An open door's column gets at least double width while open, so its interior is readable
@@ -457,6 +463,9 @@ export const PhysicalFurnitureView: React.FC = () => {
   return (
     <div className="flex-1 min-h-0 w-full bg-slate-100 flex flex-col overflow-hidden animate-in fade-in duration-150">
       {isScanning && <ScanItemsModal furnitureId={furniture.id} onClose={() => setIsScanning(false)} />}
+      {isBuildingLayout && (
+        <BuildLayoutModal furnitureId={furniture.id} onClose={() => setIsBuildingLayout(false)} onApplied={() => setOpenDoorId(null)} />
+      )}
       {scanRootId && <ScanItemsModal furnitureId={furniture.id} rootContainerId={scanRootId} onClose={() => setScanRootId(null)} />}
       {isComposing && editingSlot && (() => {
         const inside = !!editingSlot.parentContainerId;
@@ -738,9 +747,19 @@ export const PhysicalFurnitureView: React.FC = () => {
           /* ============================================================ */
           <div className="w-full max-w-2xl flex flex-col items-center gap-4 sm:gap-6 px-1 sm:px-2">
             {isComposing && (
-              <p className="w-full text-center text-xs sm:text-sm font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-2xl px-3 py-2">
-                Tap a compartment to rename, change or move it. Tap + to add one.
-              </p>
+              <div className="w-full flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsBuildingLayout(true)}
+                  className="w-full py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  Build from photo
+                </button>
+                <p className="w-full text-center text-xs sm:text-sm font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-2xl px-3 py-2">
+                  Or tap a compartment to rename, change or move it. Tap + to add one.
+                </p>
+              </div>
             )}
             {/* Furniture shell: surfaces on top, then an open frame (tables, racks) or a closed cabinet */}
             <div className="w-full flex flex-col items-center">
@@ -810,7 +829,7 @@ export const PhysicalFurnitureView: React.FC = () => {
                   <div style={{ backgroundColor: furniture.color || '#0f766e' }} className="w-2.5 sm:w-3 rounded-b-md shadow-md flex-shrink-0" />
                   <div
                     className="flex-1 grid gap-x-2 sm:gap-x-4 px-2 sm:px-4"
-                    style={{ gridTemplateColumns: gridColumns }}
+                    style={{ gridTemplateColumns: gridColumns, gridTemplateRows: '1fr', minHeight: tallMinHeight }}
                   >
                     {facadeColumns.map((col, colIdx) => (
                       <div key={colIdx} className={`flex flex-col ${isComposing ? 'gap-3' : ''}`}>
@@ -831,7 +850,7 @@ export const PhysicalFurnitureView: React.FC = () => {
                   >
                     <div
                       className="grid gap-2.5 sm:gap-4 w-full"
-                      style={{ gridTemplateColumns: gridColumns }}
+                      style={{ gridTemplateColumns: gridColumns, gridTemplateRows: '1fr', minHeight: tallMinHeight }}
                     >
                       {facadeColumns.map((col, colIdx) => (
                         <div key={colIdx} className="flex flex-col gap-2.5 sm:gap-3.5 h-full">

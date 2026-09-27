@@ -20,7 +20,7 @@ interface ScannedItem {
 // Downscale before upload: keeps the request small and the AI call fast and cheap.
 // The server (nginx) rejects request bodies over 1 MB, so stay well under that.
 const MAX_UPLOAD_BASE64 = 850 * 1024;
-async function photoToJpegBase64(file: File, maxSide = 1280): Promise<string> {
+export async function photoToJpegBase64(file: File, maxSide = 1280): Promise<string> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement('canvas');

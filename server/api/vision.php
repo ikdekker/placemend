@@ -99,6 +99,52 @@ $schema = [
     'required' => ['items'],
 ];
 
+// Layout mode: recognise how the furniture is built (sections, doors, what's behind them)
+$mode = ($body['mode'] ?? 'items') === 'layout' ? 'layout' : 'items';
+if ($mode === 'layout') {
+    $prompt = <<<PROMPT
+You are mapping how a piece of storage furniture is built, from a photo taken with its doors open.
+Furniture: "{$furnitureName}" in room "{$roomName}".
+
+Describe its structure, not its contents:
+- sections: the vertical sections from LEFT to RIGHT as you face the furniture. A section is one frame/carcass column.
+  - width: 1 for a normal/narrow section, 2 for a section about twice as wide as the narrow ones.
+  - door: "none" if the section is open (no door), "single" for one door, "pair" for two doors that close the same section.
+  - parts: what is in the section from TOP to BOTTOM, each with:
+    - type: shelf, rail (hanging rail), drawer, basket (wire/mesh basket or box), or open (open space without a shelf).
+    - name: short, e.g. "Top shelf", "Hanging rail", "Drawer 2", "Shoe shelf". Number repeated parts.
+- onTop: true if things are stored on top of the furniture.
+Count shelves and drawers carefully. Ignore the items themselves (clothes, boxes) except to tell a shelf from a rail.
+PROMPT;
+    $partSchema = [
+        'type' => 'OBJECT',
+        'properties' => [
+            'type' => ['type' => 'STRING', 'enum' => ['shelf', 'rail', 'drawer', 'basket', 'open']],
+            'name' => ['type' => 'STRING'],
+        ],
+        'required' => ['type', 'name'],
+    ];
+    $schema = [
+        'type' => 'OBJECT',
+        'properties' => [
+            'onTop' => ['type' => 'BOOLEAN'],
+            'sections' => [
+                'type' => 'ARRAY',
+                'items' => [
+                    'type' => 'OBJECT',
+                    'properties' => [
+                        'width' => ['type' => 'INTEGER'],
+                        'door' => ['type' => 'STRING', 'enum' => ['none', 'single', 'pair']],
+                        'parts' => ['type' => 'ARRAY', 'items' => $partSchema],
+                    ],
+                    'required' => ['width', 'door', 'parts'],
+                ],
+            ],
+        ],
+        'required' => ['onTop', 'sections'],
+    ];
+}
+
 $request = [
     'contents' => [[
         'role' => 'user',
@@ -116,7 +162,7 @@ $request = [
 
 // Google returns 503 ("high demand") / 429 in spikes, sometimes for a while on one model:
 // retry once, then fall back to the next model in the chain
-$fallbacks = is_array($config['fallbackModels'] ?? null) ? $config['fallbackModels'] : ['gemini-3.7-flash', 'gemini-3.5-flash'];
+$fallbacks = is_array($config['fallbackModels'] ?? null) ? $config['fallbackModels'] : ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-latest', 'gemini-3-flash-preview'];
 $modelChain = array_values(array_unique(array_merge([$model], array_map(
     fn($m) => preg_replace('/[^a-zA-Z0-9._-]/', '', (string)$m), $fallbacks
 ))));
@@ -159,6 +205,33 @@ $usage['counts'][$apiKey] = $used + 1;
 
 $text = $data['candidates'][0]['content']['parts'][0]['text'] ?? '';
 $parsed = json_decode($text, true);
+
+if ($mode === 'layout') {
+    if (!is_array($parsed) || !is_array($parsed['sections'] ?? null) || count($parsed['sections']) === 0) {
+        $reason = $data['candidates'][0]['finishReason'] ?? 'unknown';
+        sendJsonError("The AI could not recognise the layout (finish reason: $reason). Try a photo with all doors open.", 502);
+    }
+    $sections = [];
+    foreach (array_slice($parsed['sections'], 0, 6) as $sec) {
+        $parts = [];
+        foreach (array_slice(is_array($sec['parts'] ?? null) ? $sec['parts'] : [], 0, 16) as $p) {
+            $type = in_array($p['type'] ?? '', ['shelf', 'rail', 'drawer', 'basket', 'open'], true) ? $p['type'] : 'shelf';
+            $parts[] = ['type' => $type, 'name' => substr(trim((string)($p['name'] ?? ucfirst($type))), 0, 60) ?: ucfirst($type)];
+        }
+        $sections[] = [
+            'width' => ((int)($sec['width'] ?? 1)) >= 2 ? 2 : 1,
+            'door' => in_array($sec['door'] ?? '', ['none', 'single', 'pair'], true) ? $sec['door'] : 'none',
+            'parts' => $parts,
+        ];
+    }
+    sendJsonResponse([
+        'success' => true,
+        'model' => $model,
+        'layout' => ['onTop' => (bool)($parsed['onTop'] ?? false), 'sections' => $sections],
+        'scansLeftToday' => max(0, $dailyLimit - $used - 1),
+    ]);
+}
+
 if (!is_array($parsed) || !is_array($parsed['items'] ?? null)) {
     $reason = $data['candidates'][0]['finishReason'] ?? 'unknown';
     sendJsonError("The AI returned no usable result (finish reason: $reason). Try another photo.", 502);
