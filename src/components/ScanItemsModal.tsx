@@ -47,7 +47,15 @@ function slotLabels(containers: Container[]): { id: string; label: string }[] {
   return containers.map((c) => ({ id: c.id, label: label(c) })).sort((a, b) => a.label.localeCompare(b.label));
 }
 
-export const ScanItemsModal: React.FC<{ furnitureId: string; onClose: () => void }> = ({ furnitureId, onClose }) => {
+/**
+ * rootContainerId: scan only what's in that compartment (e.g. one open door). The AI is told the photo
+ * shows just that part, and can only place items in it or its sub-compartments.
+ */
+export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: string; onClose: () => void }> = ({
+  furnitureId,
+  rootContainerId,
+  onClose,
+}) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -63,14 +71,31 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; onClose: () => void
     return { furniture, room, containers };
   }, [furnitureId]);
 
-  const slots = useMemo(() => slotLabels(data?.containers || []), [data?.containers]);
+  const allSlots = useMemo(() => slotLabels(data?.containers || []), [data?.containers]);
+  // Scoped scan: the chosen compartment plus everything nested inside it
+  const scopeIds = useMemo(() => {
+    if (!rootContainerId) return null;
+    const ids = new Set([rootContainerId]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const c of data?.containers || []) {
+        if (c.parentContainerId && ids.has(c.parentContainerId) && !ids.has(c.id)) {
+          ids.add(c.id);
+          grew = true;
+        }
+      }
+    }
+    return ids;
+  }, [rootContainerId, data?.containers]);
+  const slots = useMemo(() => (scopeIds ? allSlots.filter((sl) => scopeIds.has(sl.id)) : allSlots), [allSlots, scopeIds]);
+  const scopeLabel = rootContainerId ? allSlots.find((sl) => sl.id === rootContainerId)?.label : undefined;
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || !data?.furniture) return;
     setError(null);
-    setResults(null);
     setScanning(true);
     try {
       const image = await photoToJpegBase64(file);
@@ -83,13 +108,16 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; onClose: () => void
           mimeType: 'image/jpeg',
           furnitureName: data.furniture.name,
           roomName: data.room?.name || '',
+          scopeLabel,
           slots,
         }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.success) throw new Error(json.error || `Scan failed (HTTP ${res.status})`);
       setScansLeft(typeof json.scansLeftToday === 'number' ? json.scansLeftToday : null);
-      setResults((json.items as Omit<ScannedItem, 'include'>[]).map((it) => ({ ...it, include: true })));
+      // Each photo adds to the list, so a door can be scanned shelf by shelf
+      const found = (json.items as Omit<ScannedItem, 'include'>[]).map((it) => ({ ...it, include: true }));
+      setResults((prev) => [...(prev || []), ...found]);
     } catch (err) {
       reportClientError('scan-photo-failed', err, { furnitureId });
       setError((err as Error).message || 'Scan failed');
@@ -144,7 +172,7 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; onClose: () => void
               <span>Scan items</span>
             </h3>
             <p className="text-xs text-slate-500 font-medium truncate">
-              Photograph {data?.furniture?.name || 'this furniture'} with labels facing the camera
+              {scopeLabel ? `Photograph ${scopeLabel}` : `Photograph ${data?.furniture?.name || 'this furniture'}`}, labels facing the camera. One shelf per photo works best.
             </p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 cursor-pointer" title="Close">
@@ -256,7 +284,7 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; onClose: () => void
               disabled={scanning || saving}
               className="px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer flex items-center gap-1.5"
             >
-              <Camera className="w-4 h-4" /> Rescan
+              <Camera className="w-4 h-4" /> Add photo
             </button>
             {scansLeft !== null && <span className="text-[11px] text-slate-400 font-medium">{scansLeft} scans left today</span>}
             <button

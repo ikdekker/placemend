@@ -23,8 +23,10 @@ import {
   FolderOutput,
   Check,
   X,
-  CornerDownRight
+  CornerDownRight,
+  Sparkles,
 } from 'lucide-react';
+import { ScanItemsModal } from './ScanItemsModal';
 
 export const DrawerInteriorView: React.FC = () => {
   const {
@@ -37,6 +39,7 @@ export const DrawerInteriorView: React.FC = () => {
   const { isSearching, matchingContainerIds, matchingItemIds, matchCountsByContainer } = useVisualSearch();
 
   const [isAddingCompartment, setIsAddingCompartment] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
   const [newCompName, setNewCompName] = useState('');
   const [editingCompId, setEditingCompId] = useState<string | null>(null);
   const [editingCompName, setEditingCompName] = useState('');
@@ -229,6 +232,9 @@ export const DrawerInteriorView: React.FC = () => {
 
   return (
     <div className="flex-1 min-h-0 w-full bg-slate-100 flex flex-col overflow-hidden animate-in fade-in duration-150">
+      {isScanning && (
+        <ScanItemsModal furnitureId={activeContainer.furnitureId} rootContainerId={activeContainer.id} onClose={() => setIsScanning(false)} />
+      )}
       {/* Top Header Bar */}
       <div className="bg-white border-b border-slate-200 px-3.5 sm:px-5 py-3 sm:py-3.5 flex items-center justify-between shadow-xs flex-shrink-0 gap-2">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -269,6 +275,16 @@ export const DrawerInteriorView: React.FC = () => {
               <span className="hidden sm:inline">Delete Divider</span>
             </button>
           )}
+
+          {/* Scan just this compartment (e.g. one open door), so the AI knows where the photo is */}
+          <button
+            onClick={() => setIsScanning(true)}
+            className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs sm:text-sm shadow-md transition-all cursor-pointer active:scale-95 flex-shrink-0 min-h-[44px]"
+            title={`Scan a photo of ${activeContainer.name}`}
+          >
+            <Sparkles className="w-4 h-4" />
+            <span className="hidden sm:inline">Scan</span>
+          </button>
 
           {/* Quick Add Item Button - ALWAYS available */}
           <button

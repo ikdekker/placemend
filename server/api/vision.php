@@ -52,11 +52,17 @@ foreach (array_slice(is_array($body['slots'] ?? null) ? $body['slots'] : [], 0, 
 }
 $slotIds = array_column($slots, 'id');
 $slotList = implode("\n", array_map(fn($s) => "- {$s['id']}: {$s['label']}", $slots));
+// Scoped scan: the photo shows only one part of the furniture (e.g. a single open door)
+$scopeLabel = substr(trim((string)($body['scopeLabel'] ?? '')), 0, 200);
+$scopeLine = $scopeLabel !== ''
+    ? "This photo shows ONLY this part of the furniture: \"{$scopeLabel}\". Ignore anything visible outside it (neighbouring shelves, other doors)."
+    : '';
 
 $prompt = <<<PROMPT
 You are cataloguing a home inventory from a photo of storage furniture.
 Furniture: "{$furnitureName}" in room "{$roomName}".
-Storage slots in this furniture (id: label):
+{$scopeLine}
+Storage slots you may use (id: label):
 {$slotList}
 
 For every distinct product you can see, identify the product rather than describing it:
