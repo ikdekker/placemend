@@ -36,6 +36,12 @@ export interface AppState {
   editingItemId: string | null;
   isRoomManagerOpen: boolean;
   isFurnitureLibraryOpen: boolean;
+  // Guided photo setup of a newly added piece: place it, capture its inside, fill it
+  setupFurnitureId: string | null;
+  setupStep: 'place' | 'inside' | 'fill' | null;
+  setSetup: (furnitureId: string | null, step?: 'place' | 'inside' | 'fill' | null) => void;
+  isAddWithPhotoOpen: boolean;
+  setAddWithPhotoOpen: (open: boolean) => void;
   isBackupModalOpen: boolean;
   isApiSyncModalOpen: boolean;
   isAccountModalOpen: boolean;
@@ -179,6 +185,11 @@ export const useAppStore = create<AppState>((set) => ({
     })),
   setRoomShapeModalTab: (tab) => set({ roomShapeModalTab: tab }),
   setFurnitureLibraryOpen: (open) => set({ isFurnitureLibraryOpen: open }),
+  setupFurnitureId: null,
+  setupStep: null,
+  setSetup: (furnitureId, step = null) => set({ setupFurnitureId: furnitureId, setupStep: furnitureId ? step : null }),
+  isAddWithPhotoOpen: false,
+  setAddWithPhotoOpen: (open) => set({ isAddWithPhotoOpen: open }),
   setBackupModalOpen: (open) => set({ isBackupModalOpen: open }),
   setApiSyncModalOpen: (open) => set({ isApiSyncModalOpen: open }),
   setSearchQuery: (query) => set({ searchQuery: query }),

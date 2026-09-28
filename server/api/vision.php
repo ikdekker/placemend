@@ -100,11 +100,12 @@ $schema = [
 ];
 
 // Layout mode: recognise how the furniture is built (sections, doors, what's behind them)
-$mode = ($body['mode'] ?? 'items') === 'layout' ? 'layout' : 'items';
+$mode = in_array($body['mode'] ?? 'items', ['layout', 'identify'], true) ? $body['mode'] : 'items';
 if ($mode === 'layout') {
     $prompt = <<<PROMPT
 You are mapping how a piece of storage furniture is built, from a photo taken with its doors open.
 Furniture: "{$furnitureName}" in room "{$roomName}".
+{$scopeLine}
 
 Describe its structure, not its contents:
 - sections: the vertical sections from LEFT to RIGHT as you face the furniture. A section is one frame/carcass column.
@@ -145,6 +146,53 @@ PROMPT;
     ];
 }
 
+// Identify mode: what is this piece of furniture (photographed as it stands, doors closed or open)
+$furnitureTypes = ['desk', 'closet', 'wardrobe', 'bookshelf', 'storage_rack', 'dresser', 'cabinet', 'table', 'bed', 'sofa',
+    'workbench', 'box_stack', 'kitchen_counter', 'kitchen_island', 'appliance', 'other'];
+if ($mode === 'identify') {
+    $prompt = <<<PROMPT
+You are adding a piece of furniture to a home inventory app from a photo of it, taken in room "{$roomName}".
+Identify it and describe its front:
+- name: short, recognisable name, with brand/model if obvious (e.g. "IKEA PAX wardrobe", "TV console", "KALLAX shelf").
+- furnitureType: the closest category.
+- width, depth, height: estimated outer size in METERS (use typical sizes of the recognised model when unsure).
+- color: the main colour as a hex code, e.g. "#1f2937".
+- sections: the vertical sections from LEFT to RIGHT as you face it (one frame/carcass column each).
+  - width: 1 for a normal/narrow section, 2 for one about twice as wide.
+  - fronts: what closes or divides that section from TOP to BOTTOM: door (one door), pair (two doors closing the same space),
+    drawer, shelf (open shelf), basket (open box/basket/bin) or open (open space). A tall door covering the whole section is one front.
+- hasDoors: true if any section has a door or pair.
+If it's not storage furniture (e.g. a plain table or a sofa), give a single section with an appropriate front such as one shelf.
+PROMPT;
+    $schema = [
+        'type' => 'OBJECT',
+        'properties' => [
+            'name' => ['type' => 'STRING'],
+            'furnitureType' => ['type' => 'STRING', 'enum' => $furnitureTypes],
+            'width' => ['type' => 'NUMBER'],
+            'depth' => ['type' => 'NUMBER'],
+            'height' => ['type' => 'NUMBER'],
+            'color' => ['type' => 'STRING'],
+            'hasDoors' => ['type' => 'BOOLEAN'],
+            'sections' => [
+                'type' => 'ARRAY',
+                'items' => [
+                    'type' => 'OBJECT',
+                    'properties' => [
+                        'width' => ['type' => 'INTEGER'],
+                        'fronts' => [
+                            'type' => 'ARRAY',
+                            'items' => ['type' => 'STRING', 'enum' => ['door', 'pair', 'drawer', 'shelf', 'basket', 'open']],
+                        ],
+                    ],
+                    'required' => ['width', 'fronts'],
+                ],
+            ],
+        ],
+        'required' => ['name', 'furnitureType', 'width', 'depth', 'height', 'color', 'hasDoors', 'sections'],
+    ];
+}
+
 $request = [
     'contents' => [[
         'role' => 'user',
@@ -167,18 +215,19 @@ $modelChain = array_values(array_unique(array_merge([$model], array_map(
     fn($m) => preg_replace('/[^a-zA-Z0-9._-]/', '', (string)$m), $fallbacks
 ))));
 $payload = json_encode($request);
-$attempts = [];
+$response = false;
+$httpCode = 0;
+$curlError = 'no model answered in time';
+// nginx gives up after 60 s, so stop trying well before that and return a clear error instead
+$deadline = microtime(true) + 50;
 foreach ($modelChain as $model) {
-    $attempts[] = [$model, 0];
-    $attempts[] = [$model, 2];
-}
-foreach ($attempts as [$model, $waitSeconds]) {
-    if ($waitSeconds > 0) sleep($waitSeconds);
+    $remaining = (int)floor($deadline - microtime(true));
+    if ($remaining < 5) break;
     $ch = curl_init("https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent");
     curl_setopt_array($ch, [
         CURLOPT_POST => true,
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 90,
+        CURLOPT_TIMEOUT => min(30, $remaining), // a hanging model must not use up the whole budget
         CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'x-goog-api-key: ' . $geminiKey],
         CURLOPT_POSTFIELDS => $payload,
     ]);
@@ -205,6 +254,38 @@ $usage['counts'][$apiKey] = $used + 1;
 
 $text = $data['candidates'][0]['content']['parts'][0]['text'] ?? '';
 $parsed = json_decode($text, true);
+
+if ($mode === 'identify') {
+    if (!is_array($parsed) || trim((string)($parsed['name'] ?? '')) === '') {
+        $reason = $data['candidates'][0]['finishReason'] ?? 'unknown';
+        sendJsonError("The AI could not recognise the furniture (finish reason: $reason). Try a photo of the whole piece.", 502);
+    }
+    $meters = fn($v, $min, $max, $default) => is_numeric($v) && $v > 0 ? round(max($min, min($max, (float)$v)), 2) : $default;
+    $sections = [];
+    foreach (array_slice(is_array($parsed['sections'] ?? null) ? $parsed['sections'] : [], 0, 6) as $sec) {
+        $fronts = [];
+        foreach (array_slice(is_array($sec['fronts'] ?? null) ? $sec['fronts'] : [], 0, 10) as $fr) {
+            if (in_array($fr, ['door', 'pair', 'drawer', 'shelf', 'basket', 'open'], true)) $fronts[] = $fr;
+        }
+        $sections[] = ['width' => ((int)($sec['width'] ?? 1)) >= 2 ? 2 : 1, 'fronts' => $fronts ?: ['shelf']];
+    }
+    $color = preg_match('/^#[0-9a-fA-F]{6}$/', (string)($parsed['color'] ?? '')) ? $parsed['color'] : '#64748b';
+    sendJsonResponse([
+        'success' => true,
+        'model' => $model,
+        'furniture' => [
+            'name' => substr(trim((string)$parsed['name']), 0, 80),
+            'type' => in_array($parsed['furnitureType'] ?? '', $furnitureTypes, true) ? $parsed['furnitureType'] : 'other',
+            'width' => $meters($parsed['width'] ?? null, 0.2, 6, 1),
+            'depth' => $meters($parsed['depth'] ?? null, 0.2, 3, 0.5),
+            'height' => $meters($parsed['height'] ?? null, 0.2, 3, 1),
+            'color' => $color,
+            'hasDoors' => (bool)($parsed['hasDoors'] ?? false),
+            'sections' => $sections ?: [['width' => 1, 'fronts' => ['shelf']]],
+        ],
+        'scansLeftToday' => max(0, $dailyLimit - $used - 1),
+    ]);
+}
 
 if ($mode === 'layout') {
     if (!is_array($parsed) || !is_array($parsed['sections'] ?? null) || count($parsed['sections']) === 0) {

@@ -51,10 +51,11 @@ function slotLabels(containers: Container[]): { id: string; label: string }[] {
  * rootContainerId: scan only what's in that compartment (e.g. one open door). The AI is told the photo
  * shows just that part, and can only place items in it or its sub-compartments.
  */
-export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: string; onClose: () => void }> = ({
+export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: string; onClose: () => void; onAdded?: (count: number) => void }> = ({
   furnitureId,
   rootContainerId,
   onClose,
+  onAdded,
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -149,6 +150,7 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: s
       }));
       await db.items.bulkAdd(items);
       scheduleAutoSync();
+      onAdded?.(items.length);
       onClose();
     } catch (err) {
       reportClientError('scan-save-failed', err, { furnitureId });

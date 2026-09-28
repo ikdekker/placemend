@@ -9,6 +9,8 @@ import { RoomManagerModal } from './components/RoomManagerModal';
 import { RoomShapeModal } from './components/RoomShapeModal';
 import { BackupModal } from './components/BackupModal';
 import { ApiSyncModal } from './components/ApiSyncModal';
+import { AddWithPhotoModal } from './components/AddWithPhotoModal';
+import { SetupGuide } from './components/SetupGuide';
 import { AccountModal } from './components/AccountModal';
 import { ConnectRoomModal } from './components/ConnectRoomModal';
 import { MultiRoomOverviewModal } from './components/MultiRoomOverviewModal';
@@ -120,6 +122,8 @@ export function App() {
       <SearchModal />
       <ItemModal />
       <FurnitureLibrary />
+      <AddWithPhotoModal />
+      <SetupGuide />
       <RoomManagerModal />
       <RoomShapeModal />
       <BackupModal />

@@ -433,6 +433,7 @@ export const FurnitureLibrary: React.FC = () => {
     setFurnitureLibraryOpen,
     setSelectedFurnitureId,
     setAppMode,
+    setAddWithPhotoOpen,
   } = useAppStore();
 
   // Tiered navigation: null means Level 1 (Categories overview). Selecting a category enters Level 2 (Items in that category).
@@ -784,6 +785,23 @@ export const FurnitureLibrary: React.FC = () => {
           {/* TIER 1: Category Selection Grid (Shown when no category is picked and not searching) */}
           {!selectedCategory && !searchQuery && (
             <div>
+              {/* Fastest way in: photograph the real piece and let the AI set it up */}
+              <button
+                type="button"
+                onClick={() => {
+                  setFurnitureLibraryOpen(false);
+                  setAddWithPhotoOpen(true);
+                }}
+                className="w-full mb-5 p-4 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-3 text-left shadow-md cursor-pointer"
+              >
+                <span className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
+                  <Sparkles className="w-5 h-5" />
+                </span>
+                <span>
+                  <span className="block text-sm font-extrabold">Add with a photo</span>
+                  <span className="block text-xs text-indigo-100">Photograph your furniture; it's recognised and set up for you</span>
+                </span>
+              </button>
               <div className="mb-3">
                 <h4 className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider">
                   Select a Furniture Category
