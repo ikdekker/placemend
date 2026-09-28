@@ -121,6 +121,9 @@ export const FloorCanvas: React.FC = () => {
 
   // Resizing Furniture from handle (Only enabled in Edit Mode)
   const [resizingFurnitureId, setResizingFurnitureId] = useState<string | null>(null);
+  // Resize handles only when asked for: they sit on top of small pieces and turned moves into resizes
+  const [dragResizeOn, setDragResizeOn] = useState(false);
+  useEffect(() => setDragResizeOn(false), [selectedFurnitureId]);
   const [resizeHandleType, setResizeHandleType] = useState<'corner' | 'width' | 'length'>('corner');
   const [resizeStart, setResizeStart] = useState({ mouseX: 0, mouseY: 0, origW: 0, origL: 0 });
   const [resizeLiveDim, setResizeLiveDim] = useState<{ id: string; w: number; l: number } | null>(null);
@@ -1137,6 +1140,26 @@ export const FloorCanvas: React.FC = () => {
               <span>Flip</span>
             </button>
 
+            {/* Drag-resizing is opt-in: by default dragging a piece always moves it */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setDragResizeOn(!dragResizeOn);
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onTouchEnd={(e) => e.stopPropagation()}
+              aria-pressed={dragResizeOn}
+              className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 ${
+                dragResizeOn ? 'bg-blue-600 text-white shadow-xs' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+              } rounded-xl font-bold cursor-pointer transition-colors active:scale-95 flex-shrink-0`}
+              title={dragResizeOn ? 'Stop resizing by dragging (dragging moves the piece again)' : 'Resize by dragging the corner and edges'}
+            >
+              <ArrowDownRight className={`w-3.5 h-3.5 ${dragResizeOn ? 'text-white' : 'text-indigo-600'}`} />
+              <span>{dragResizeOn ? 'Resizing' : 'Drag to resize'}</span>
+            </button>
+
             <div className="w-px h-4 bg-slate-200 flex-shrink-0 hidden xs:block" />
 
             {/* Quick Dimension Controls (Width x Length) */}
@@ -1708,7 +1731,7 @@ export const FloorCanvas: React.FC = () => {
                 )}
 
                 {/* Resize Handles (Prominently visible when item is selected in Edit Mode) */}
-                {appMode === 'edit' && isSelected && (
+                {appMode === 'edit' && isSelected && dragResizeOn && (
                   <>
                     {/* Bottom-Right Corner Resize Handle (Dual-axis resize) */}
                     <div
