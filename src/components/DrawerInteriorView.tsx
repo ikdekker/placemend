@@ -27,6 +27,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { ScanItemsModal } from './ScanItemsModal';
+import { effectiveContainerType } from '../utils/containerKind';
 
 export const DrawerInteriorView: React.FC = () => {
   const {
@@ -34,6 +35,7 @@ export const DrawerInteriorView: React.FC = () => {
     selectedContainerId,
     setSelectedContainerId,
     setItemModalOpen,
+    setOpenDoorId,
   } = useAppStore();
 
   const { isSearching, matchingContainerIds, matchingItemIds, matchCountsByContainer } = useVisualSearch();
@@ -88,7 +90,11 @@ export const DrawerInteriorView: React.FC = () => {
   const isInsideCompartment = Boolean(activeContainer.parentContainerId);
 
   const handleStepBack = () => {
-    if (activeContainer.parentContainerId) {
+    // Behind a door on the front: go back to the furniture with that door still open
+    if (parentContainer && !parentContainer.parentContainerId && effectiveContainerType(parentContainer) === 'cabinet_door') {
+      setOpenDoorId(parentContainer.id);
+      setSelectedContainerId(null);
+    } else if (activeContainer.parentContainerId) {
       setSelectedContainerId(activeContainer.parentContainerId);
     } else {
       setSelectedContainerId(null);

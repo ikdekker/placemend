@@ -36,6 +36,9 @@ export interface AppState {
   editingItemId: string | null;
   isRoomManagerOpen: boolean;
   isFurnitureLibraryOpen: boolean;
+  // Door opened in place on the furniture front (kept here so 'back' from a drawer returns to it)
+  openDoorId: string | null;
+  setOpenDoorId: (id: string | null) => void;
   // Guided photo setup of a newly added piece: place it, capture its inside, fill it
   setupFurnitureId: string | null;
   setupStep: 'place' | 'inside' | 'fill' | null;
@@ -155,7 +158,7 @@ export const useAppStore = create<AppState>((set) => ({
       fitViewTrigger: s.fitViewTrigger + 1,
     }));
   },
-  setSelectedFurnitureId: (id) => set({ selectedFurnitureId: id, selectedContainerId: null }),
+  setSelectedFurnitureId: (id) => set({ selectedFurnitureId: id, selectedContainerId: null, openDoorId: null }),
   setSelectedContainerId: (id) => set({ selectedContainerId: id }),
   setHighlightedFurnitureId: (id) => set({ highlightedFurnitureId: id }),
 
@@ -185,6 +188,8 @@ export const useAppStore = create<AppState>((set) => ({
     })),
   setRoomShapeModalTab: (tab) => set({ roomShapeModalTab: tab }),
   setFurnitureLibraryOpen: (open) => set({ isFurnitureLibraryOpen: open }),
+  openDoorId: null,
+  setOpenDoorId: (id) => set({ openDoorId: id }),
   setupFurnitureId: null,
   setupStep: null,
   setSetup: (furnitureId, step = null) => set({ setupFurnitureId: furnitureId, setupStep: furnitureId ? step : null }),

@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
+import { IntegerInput } from './IntegerInput';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { Container, Item } from '../types';
@@ -253,11 +254,11 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: s
                     />
                     <label className="flex items-center gap-1 text-xs font-bold text-slate-500 flex-shrink-0">
                       ×
-                      <input
-                        type="number"
+                      <IntegerInput
+                        aria-label={`Quantity of ${r.name}`}
                         min={1}
                         value={r.quantity}
-                        onChange={(e) => update(idx, { quantity: parseInt(e.target.value, 10) || 1 })}
+                        onChange={(n) => update(idx, { quantity: n })}
                         className="w-12 text-sm text-slate-900 bg-slate-100 rounded-lg px-1.5 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-400"
                       />
                     </label>

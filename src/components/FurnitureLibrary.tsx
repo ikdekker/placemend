@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef } from 'react';
+import { MeterInput } from './MeterInput';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
 import { Container, Furniture, FurnitureType, FurnitureShape } from '../types';
@@ -1009,13 +1010,11 @@ export const FurnitureLibrary: React.FC = () => {
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     Width {customShape === 'round' ? '(Diameter)' : '(meters)'}
                   </label>
-                  <input
-                    type="number"
+                  <MeterInput
                     min={0.2}
-                    step={0.1}
                     max={20}
                     value={customWidth}
-                    onChange={(e) => setCustomWidth(parseFloat(e.target.value) || 0.2)}
+                    onChange={setCustomWidth}
                     className="w-full bg-white text-slate-800 text-xs px-3 py-2 rounded-xl border border-slate-200 font-mono shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
@@ -1023,13 +1022,11 @@ export const FurnitureLibrary: React.FC = () => {
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     Length {customShape === 'round' ? '(Diameter)' : '(meters)'}
                   </label>
-                  <input
-                    type="number"
+                  <MeterInput
                     min={0.2}
-                    step={0.1}
                     max={20}
                     value={customLength}
-                    onChange={(e) => setCustomLength(parseFloat(e.target.value) || 0.2)}
+                    onChange={setCustomLength}
                     className="w-full bg-white text-slate-800 text-xs px-3 py-2 rounded-xl border border-slate-200 font-mono shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>

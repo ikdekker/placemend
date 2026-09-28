@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { IntegerInput } from './IntegerInput';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
@@ -199,11 +200,10 @@ export const ItemModal: React.FC = () => {
               <label className="block text-xs font-bold text-slate-700 mb-1">
                 Quantity
               </label>
-              <input
-                type="number"
+              <IntegerInput
                 min={1}
                 value={quantity}
-                onChange={(e) => setQuantity(parseInt(e.target.value, 10) || 1)}
+                onChange={setQuantity}
                 className="w-full bg-slate-50 text-slate-900 text-sm px-3.5 py-2.5 rounded-xl border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono transition-all shadow-xs"
               />
             </div>

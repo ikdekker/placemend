@@ -33,6 +33,8 @@ export const PhysicalFurnitureView: React.FC = () => {
     setSelectedFurnitureId,
     setSelectedContainerId,
     setItemModalOpen,
+    openDoorId,
+    setOpenDoorId,
   } = useAppStore();
 
   const { isSearching, matchingContainerIds, matchingItemIds, matchCountsByContainer } = useVisualSearch();
@@ -43,7 +45,6 @@ export const PhysicalFurnitureView: React.FC = () => {
   const [isScanning, setIsScanning] = useState(false);
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   // A door opened in place: its column shows what's behind it
-  const [openDoorId, setOpenDoorId] = useState<string | null>(null);
   // Scan scoped to one compartment (e.g. the open door); null = whole furniture
   const [scanRootId, setScanRootId] = useState<string | null>(null);
   const [isBuildingLayout, setIsBuildingLayout] = useState(false);
