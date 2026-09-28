@@ -139,7 +139,7 @@ export const AddWithPhotoModal: React.FC = () => {
         <div className="p-4 sm:p-5 overflow-y-auto flex-1 space-y-3">
           {preview && <img src={preview} alt="Furniture" className="w-full max-h-48 object-contain rounded-2xl bg-slate-100" />}
 
-          {!ident && !scanning && (
+          {!ident && !scanning && !error && (
             <button
               onClick={() => inputRef.current?.click()}
               className="w-full py-6 rounded-2xl border-2 border-dashed border-indigo-300 bg-indigo-50/60 hover:bg-indigo-50 text-indigo-700 font-bold text-sm flex flex-col items-center gap-2 cursor-pointer"

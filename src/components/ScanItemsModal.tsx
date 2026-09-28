@@ -201,7 +201,7 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: s
             </p>
           )}
 
-          {!results && !scanning && slots.length > 0 && (
+          {!results && !scanning && !error && slots.length > 0 && (
             <button
               onClick={() => inputRef.current?.click()}
               className="w-full py-6 rounded-2xl border-2 border-dashed border-indigo-300 bg-indigo-50/60 hover:bg-indigo-50 text-indigo-700 font-bold text-sm flex flex-col items-center gap-2 cursor-pointer"

@@ -213,7 +213,27 @@ $request = [
 $fallbacks = is_array($config['fallbackModels'] ?? null) ? $config['fallbackModels'] : ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-latest', 'gemini-3-flash-preview'];
 $modelChain = array_values(array_unique(array_merge([$model], array_map(
     fn($m) => preg_replace('/[^a-zA-Z0-9._-]/', '', (string)$m), $fallbacks
-))));
+), ['gemini-flash-latest', 'gemini-3.6-flash'])));
+
+// Model health: on the free tier the newest models are often "busy". Try the model that answered
+// most recently first, and skip models that were busy in the last few minutes (unless nothing else is left).
+$healthFile = $accountsDir . '/gemini-health.json';
+$health = json_decode((string)@file_get_contents($healthFile), true);
+if (!is_array($health)) $health = [];
+$now = time();
+$busyRecently = fn($m) => ($health[$m]['busyAt'] ?? 0) > $now - 180 && ($health[$m]['busyAt'] ?? 0) > ($health[$m]['okAt'] ?? 0);
+$configOrder = array_flip($modelChain);
+usort($modelChain, function ($a, $b) use ($health, $busyRecently, $configOrder) {
+    $busyDiff = (int)$busyRecently($a) - (int)$busyRecently($b);
+    if ($busyDiff !== 0) return $busyDiff;                          // healthy models first
+    $okDiff = ($health[$b]['okAt'] ?? 0) <=> ($health[$a]['okAt'] ?? 0);
+    return $okDiff !== 0 ? $okDiff : $configOrder[$a] <=> $configOrder[$b]; // most recently working first
+});
+$saveHealth = function () use (&$health, $healthFile) {
+    @file_put_contents($healthFile, json_encode($health), LOCK_EX);
+    @chmod($healthFile, 0666);
+};
+
 $payload = json_encode($request);
 $response = false;
 $httpCode = 0;
@@ -235,14 +255,23 @@ foreach ($modelChain as $model) {
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $curlError = curl_error($ch);
     curl_close($ch);
-    if ($response !== false && !in_array($httpCode, [429, 503, 404], true)) break; // 404: model retired for this key
+    if ($response !== false && $httpCode === 200) {
+        $health[$model]['okAt'] = time();
+        break;
+    }
+    // Busy, rate limited, retired (404) or hanging: remember it so the next scan skips it for a while
+    $health[$model]['busyAt'] = time();
+    if ($response !== false && !in_array($httpCode, [429, 503, 404], true)) break; // real error (e.g. bad request): stop
 }
+$saveHealth();
 
+$busyMessage = "Google's AI is busy right now (this happens on the free tier). Tap Try again in a moment; your photo is kept.";
 if ($response === false) {
-    sendJsonError('Could not reach the AI service: ' . $curlError, 502);
+    sendJsonError($busyMessage, 503);
 }
 $data = json_decode($response, true);
 if ($httpCode !== 200) {
+    if (in_array($httpCode, [429, 503], true)) sendJsonError($busyMessage, 503);
     $msg = $data['error']['message'] ?? "HTTP $httpCode";
     sendJsonError('AI service error: ' . substr($msg, 0, 300), 502);
 }
