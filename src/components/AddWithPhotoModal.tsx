@@ -4,6 +4,7 @@ import { useAppStore } from '../store/useAppStore';
 import { FurnitureType } from '../types';
 import { API_BASE_URL, getWorkspaceApiKey, scheduleAutoSync } from '../services/apiSync';
 import { reportClientError } from '../services/errorReport';
+import { PhotoError } from './PhotoError';
 import { photoToJpegBase64 } from './ScanItemsModal';
 import { MeterInput } from './MeterInput';
 import { IdentifiedFurniture, createFurnitureFromPhoto } from '../utils/layoutFromAi';
@@ -47,6 +48,7 @@ export const AddWithPhotoModal: React.FC = () => {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ident, setIdent] = useState<IdentifiedFurniture | null>(null);
+  const [lastImage, setLastImage] = useState<string | null>(null);
 
   if (!isAddWithPhotoOpen) return null;
 
@@ -55,18 +57,25 @@ export const AddWithPhotoModal: React.FC = () => {
     setPreview(null);
     setIdent(null);
     setError(null);
+    setLastImage(null);
   };
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    const image = await photoToJpegBase64(file);
+    setPreview(`data:image/jpeg;base64,${image}`);
+    setLastImage(image);
+    await sendPhoto(image);
+  };
+
+  // Kept separately so "Try again" can resend the same photo after a failure
+  const sendPhoto = async (image: string) => {
     setError(null);
     setIdent(null);
     setScanning(true);
     try {
-      const image = await photoToJpegBase64(file);
-      setPreview(`data:image/jpeg;base64,${image}`);
       const room = selectedRoomId ? await db.rooms.get(selectedRoomId) : undefined;
       const res = await fetch(`${API_BASE_URL}/vision.php`, {
         method: 'POST',
@@ -76,6 +85,7 @@ export const AddWithPhotoModal: React.FC = () => {
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.success) throw new Error(json.error || `Scan failed (HTTP ${res.status})`);
       setIdent(json.furniture as IdentifiedFurniture);
+      setLastImage(null);
     } catch (err) {
       reportClientError('identify-furniture-failed', err, {});
       setError((err as Error).message || 'Could not recognise the furniture');
@@ -147,9 +157,12 @@ export const AddWithPhotoModal: React.FC = () => {
           )}
 
           {error && (
-            <div role="alert" className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold break-words">
-              {error}
-            </div>
+            <PhotoError
+              error={error}
+              busy={scanning}
+              onRetry={lastImage ? () => sendPhoto(lastImage) : undefined}
+              onRetake={() => inputRef.current?.click()}
+            />
           )}
 
           {ident && (

@@ -4,6 +4,7 @@ import { db } from '../db/database';
 import { Container, Item } from '../types';
 import { API_BASE_URL, getWorkspaceApiKey, scheduleAutoSync } from '../services/apiSync';
 import { reportClientError } from '../services/errorReport';
+import { PhotoError } from './PhotoError';
 import { X, Camera, Sparkles, Loader2, Check } from 'lucide-react';
 
 interface ScannedItem {
@@ -64,6 +65,7 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: s
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<ScannedItem[] | null>(null);
   const [scansLeft, setScansLeft] = useState<number | null>(null);
+  const [lastImage, setLastImage] = useState<string | null>(null);
 
   const data = useLiveQuery(async () => {
     const furniture = await db.furniture.get(furnitureId);
@@ -96,11 +98,18 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: s
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || !data?.furniture) return;
+    const image = await photoToJpegBase64(file);
+    setPreview(`data:image/jpeg;base64,${image}`);
+    setLastImage(image);
+    await sendPhoto(image);
+  };
+
+  // Kept separately so "Try again" can resend the same photo after a failure
+  const sendPhoto = async (image: string) => {
+    if (!data?.furniture) return;
     setError(null);
     setScanning(true);
     try {
-      const image = await photoToJpegBase64(file);
-      setPreview(`data:image/jpeg;base64,${image}`);
       const res = await fetch(`${API_BASE_URL}/vision.php`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-API-Key': getWorkspaceApiKey() },
@@ -119,6 +128,7 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: s
       // Each photo adds to the list, so a door can be scanned shelf by shelf
       const found = (json.items as Omit<ScannedItem, 'include'>[]).map((it) => ({ ...it, include: true }));
       setResults((prev) => [...(prev || []), ...found]);
+      setLastImage(null);
     } catch (err) {
       reportClientError('scan-photo-failed', err, { furnitureId });
       setError((err as Error).message || 'Scan failed');
@@ -209,9 +219,12 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: s
           )}
 
           {error && (
-            <div role="alert" className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold break-words">
-              {error}
-            </div>
+            <PhotoError
+              error={error}
+              busy={scanning}
+              onRetry={lastImage ? () => sendPhoto(lastImage) : undefined}
+              onRetake={() => inputRef.current?.click()}
+            />
           )}
 
           {results && results.length === 0 && (

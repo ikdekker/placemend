@@ -5,6 +5,7 @@ import { useAppStore } from '../store/useAppStore';
 import { Container } from '../types';
 import { API_BASE_URL, getWorkspaceApiKey, scheduleAutoSync } from '../services/apiSync';
 import { reportClientError } from '../services/errorReport';
+import { PhotoError } from './PhotoError';
 import { photoToJpegBase64, ScanItemsModal } from './ScanItemsModal';
 import { LayoutSection, setDoorInterior } from '../utils/layoutFromAi';
 import { effectiveContainerType } from '../utils/containerKind';
@@ -27,16 +28,23 @@ const InsidePhotoModal: React.FC<{ furnitureId: string; furnitureName: string; d
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [plan, setPlan] = useState<{ door: Container; parts: LayoutSection['parts'] }[] | null>(null);
+  const [lastImage, setLastImage] = useState<string | null>(null);
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    const image = await photoToJpegBase64(file);
+    setLastImage(image);
+    await sendPhoto(image);
+  };
+
+  // Kept separately so "Try again" can resend the same photo after a failure
+  const sendPhoto = async (image: string) => {
     setError(null);
     setPlan(null);
     setScanning(true);
     try {
-      const image = await photoToJpegBase64(file);
       const res = await fetch(`${API_BASE_URL}/vision.php`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-API-Key': getWorkspaceApiKey() },
@@ -53,6 +61,7 @@ const InsidePhotoModal: React.FC<{ furnitureId: string; furnitureName: string; d
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.success) throw new Error(json.error || `Scan failed (HTTP ${res.status})`);
       const sections = (json.layout?.sections || []) as LayoutSection[];
+      setLastImage(null);
       if (door) {
         // One door open: everything recognised belongs behind it
         setPlan([{ door, parts: sections.flatMap((s) => s.parts) }]);
@@ -116,9 +125,12 @@ const InsidePhotoModal: React.FC<{ furnitureId: string; furnitureName: string; d
             </div>
           )}
           {error && (
-            <div role="alert" className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold break-words">
-              {error}
-            </div>
+            <PhotoError
+              error={error}
+              busy={scanning}
+              onRetry={lastImage ? () => sendPhoto(lastImage) : undefined}
+              onRetake={() => inputRef.current?.click()}
+            />
           )}
           {plan && (
             <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${plan.length}, minmax(0, 1fr))` }}>

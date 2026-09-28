@@ -4,6 +4,7 @@ import { db } from '../db/database';
 import { Container, ContainerType } from '../types';
 import { API_BASE_URL, getWorkspaceApiKey, scheduleAutoSync } from '../services/apiSync';
 import { reportClientError } from '../services/errorReport';
+import { PhotoError } from './PhotoError';
 import { photoToJpegBase64 } from './ScanItemsModal';
 import { X, Camera, Sparkles, Loader2, Check } from 'lucide-react';
 
@@ -50,6 +51,7 @@ export const BuildLayoutModal: React.FC<{ furnitureId: string; onClose: () => vo
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [layout, setLayout] = useState<Layout | null>(null);
+  const [lastImage, setLastImage] = useState<string | null>(null);
 
   const data = useLiveQuery(async () => {
     const furniture = await db.furniture.get(furnitureId);
@@ -63,12 +65,19 @@ export const BuildLayoutModal: React.FC<{ furnitureId: string; onClose: () => vo
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || !data?.furniture) return;
+    const image = await photoToJpegBase64(file);
+    setPreview(`data:image/jpeg;base64,${image}`);
+    setLastImage(image);
+    await sendPhoto(image);
+  };
+
+  // Kept separately so "Try again" can resend the same photo after a failure
+  const sendPhoto = async (image: string) => {
+    if (!data?.furniture) return;
     setError(null);
     setLayout(null);
     setScanning(true);
     try {
-      const image = await photoToJpegBase64(file);
-      setPreview(`data:image/jpeg;base64,${image}`);
       const res = await fetch(`${API_BASE_URL}/vision.php`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-API-Key': getWorkspaceApiKey() },
@@ -84,6 +93,7 @@ export const BuildLayoutModal: React.FC<{ furnitureId: string; onClose: () => vo
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.success) throw new Error(json.error || `Scan failed (HTTP ${res.status})`);
       setLayout(json.layout as Layout);
+      setLastImage(null);
     } catch (err) {
       reportClientError('build-layout-failed', err, { furnitureId });
       setError((err as Error).message || 'Could not recognise the layout');
@@ -206,9 +216,12 @@ export const BuildLayoutModal: React.FC<{ furnitureId: string; onClose: () => vo
           )}
 
           {error && (
-            <div role="alert" className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold break-words">
-              {error}
-            </div>
+            <PhotoError
+              error={error}
+              busy={scanning}
+              onRetry={lastImage ? () => sendPhoto(lastImage) : undefined}
+              onRetake={() => inputRef.current?.click()}
+            />
           )}
 
           {layout && (
