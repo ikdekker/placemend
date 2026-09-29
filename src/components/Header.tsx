@@ -118,10 +118,10 @@ export const Header: React.FC = () => {
           </button>
           <button
             onClick={() => setMultiRoomOverviewOpen(true)}
-            className="p-1 text-slate-500 hover:text-blue-600 hover:bg-slate-200/80 rounded-md transition-colors cursor-pointer flex-shrink-0 flex items-center gap-1"
+            className="min-w-[40px] min-h-[40px] justify-center text-slate-500 hover:text-blue-600 hover:bg-slate-200/80 rounded-lg transition-colors cursor-pointer flex-shrink-0 flex items-center gap-1"
             title="Multi-Room Connected Overview (House Floor Plan Grid)"
           >
-            <LayoutGrid className="w-3.5 h-3.5 text-blue-600" />
+            <LayoutGrid className="w-5 h-5 text-blue-600" />
             <span className="hidden lg:inline text-xs font-bold text-slate-700">All Rooms</span>
           </button>
         </div>
@@ -178,7 +178,7 @@ export const Header: React.FC = () => {
               setAppMode('view');
               setSelectedFurnitureId(null);
             }}
-            className={`flex items-center gap-1 px-1.5 py-1 sm:px-2.5 sm:py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            className={`flex items-center gap-1 min-h-[40px] min-w-[44px] justify-center px-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               appMode === 'view'
                 ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
                 : 'text-slate-500 hover:text-slate-800'
@@ -194,7 +194,7 @@ export const Header: React.FC = () => {
               setAppMode('edit');
               setSelectedFurnitureId(null);
             }}
-            className={`flex items-center gap-1 px-1.5 py-1 sm:px-2.5 sm:py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            className={`flex items-center gap-1 min-h-[40px] min-w-[44px] justify-center px-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               appMode === 'edit'
                 ? 'bg-blue-600 text-white shadow-xs'
                 : 'text-slate-500 hover:text-slate-800'
@@ -212,7 +212,7 @@ export const Header: React.FC = () => {
         {/* User Account / Sign In Button (Far Top Right) */}
         <button
           onClick={() => setAccountModalOpen(true)}
-          className="flex items-center gap-1.5 px-2 py-1 sm:px-2.5 sm:py-1 text-xs font-bold rounded-xl transition-all cursor-pointer border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 shadow-2xs active:scale-95 min-h-[34px]"
+          className="flex items-center gap-1.5 px-2 py-1 sm:px-2.5 sm:py-1 text-xs font-bold rounded-xl transition-all cursor-pointer border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 shadow-2xs active:scale-95 min-h-[44px] min-w-[44px] justify-center"
           title={currentUser ? `Account: ${currentUser.name} (${currentUser.email})` : 'Sign In to Placemend'}
         >
           {currentUser?.picture ? (

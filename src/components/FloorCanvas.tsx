@@ -9,18 +9,9 @@ import {
   RotateCw, 
   RotateCcw,
   Trash2, 
-  Grid, 
-  Eye, 
   Pentagon, 
-  Maximize2, 
-  Minimize2,
-  Focus,
-  Sliders, 
-  Sparkles, 
   DoorOpen, 
   FlipHorizontal, 
-  FlipVertical, 
-  Ruler,
   MapPin,
   Plus,
   Minus,
@@ -30,11 +21,12 @@ import {
   ArrowRight,
   ArrowDownRight
 } from 'lucide-react';
-import { rotateRoom90Clockwise, mirrorRoom, getDoorSvgGeometry, getRoomDoors, snapFurniturePosition, getRoomWallSegments } from '../utils/roomGeometry';
+import { getDoorSvgGeometry, getRoomDoors, snapFurniturePosition, getRoomWallSegments } from '../utils/roomGeometry';
 import { scheduleAutoSync } from '../services/apiSync';
 import { seedDemoDataIfEmpty, scheduleSeedIfEmpty } from '../db/sampleData';
 import { roundCm, snapTo, formatMeters } from '../utils/measure';
 import { MeterInput } from './MeterInput';
+import { CanvasOptionsMenu } from './CanvasOptionsMenu';
 
 export const FloorCanvas: React.FC = () => {
   const {
@@ -123,7 +115,15 @@ export const FloorCanvas: React.FC = () => {
   const [resizingFurnitureId, setResizingFurnitureId] = useState<string | null>(null);
   // Resize handles only when asked for: they sit on top of small pieces and turned moves into resizes
   const [dragResizeOn, setDragResizeOn] = useState(false);
+  // Only the tapped door shows its full label/handles; the others stay small so they don't get in the way
+  const [activeDoorId, setActiveDoorId] = useState<string | null>(null);
   useEffect(() => setDragResizeOn(false), [selectedFurnitureId]);
+  useEffect(() => {
+    if (selectedFurnitureId) setActiveDoorId(null);
+  }, [selectedFurnitureId]);
+  useEffect(() => {
+    if (appMode !== 'edit') setActiveDoorId(null);
+  }, [appMode]);
   const [resizeHandleType, setResizeHandleType] = useState<'corner' | 'width' | 'length'>('corner');
   const [resizeStart, setResizeStart] = useState({ mouseX: 0, mouseY: 0, origW: 0, origL: 0 });
   const [resizeLiveDim, setResizeLiveDim] = useState<{ id: string; w: number; l: number } | null>(null);
@@ -617,6 +617,7 @@ export const FloorCanvas: React.FC = () => {
       } else {
         // Tapped empty room floor -> Deselect
         setSelectedFurnitureId(null);
+        setActiveDoorId(null);
       }
     }
     isPointerDownOnCanvas.current = false;
@@ -895,191 +896,65 @@ export const FloorCanvas: React.FC = () => {
         </div>
       )}
 
-      {/* View Mode Compact Canvas Controls */}
-      {appMode === 'view' && (
-        <div
-          data-toolbar="view-controls"
-          onMouseDown={(e) => e.stopPropagation()}
-          onTouchStart={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-          className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20 flex items-center gap-1.5 bg-white/95 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-slate-200 shadow-md text-slate-700"
-        >
-          <button
-            onClick={toggleShowDimensions}
-            className={`flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl transition-colors cursor-pointer ${
-              showDimensions ? 'bg-blue-50 text-blue-600 border border-blue-200' : 'hover:bg-slate-100 text-slate-500'
-            }`}
-            title={showDimensions ? 'Dimensions: ON' : 'Dimensions: OFF'}
-          >
-            <Ruler className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Dimensions</span>
-          </button>
-          <button
-            onClick={toggleShowLabels}
-            className={`p-1.5 rounded-xl transition-colors cursor-pointer ${
-              showLabels ? 'bg-blue-50 text-blue-600 border border-blue-200' : 'hover:bg-slate-100 text-slate-400'
-            }`}
-            title={showLabels ? 'Labels: ON' : 'Labels: OFF'}
-          >
-            <Eye className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={fitRoomToViewport}
-            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer"
-            title="Recenter & Fit Room View"
-          >
-            <Focus className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={toggleBrowserFullscreen}
-            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer"
-            title={isBrowserFullscreen ? "Exit Fullscreen (F11 / Esc)" : "Fullscreen Canvas (F11)"}
-          >
-            {isBrowserFullscreen ? (
-              <Minimize2 className="w-3.5 h-3.5 text-blue-600" />
-            ) : (
-              <Maximize2 className="w-3.5 h-3.5" />
-            )}
-          </button>
+      {/* Top toolbar: few, big, labelled buttons; the rest lives in the View menu */}
+      <div
+        data-toolbar={appMode === 'edit' ? 'edit-controls' : 'view-controls'}
+        onMouseDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+        className="absolute top-3 left-3 right-3 sm:right-auto sm:top-4 sm:left-4 z-20 flex items-center gap-1.5 bg-white/95 backdrop-blur-md px-1.5 py-1.5 rounded-2xl border border-slate-200 shadow-md text-slate-700"
+      >
+        {appMode === 'edit' && (
+          <>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setFurnitureLibraryOpen(true);
+              }}
+              className="min-h-[44px] flex items-center gap-1.5 text-sm font-bold px-3.5 rounded-xl text-white bg-blue-600 hover:bg-blue-700 shadow-xs transition-colors cursor-pointer flex-shrink-0"
+              title="Add Furniture, Tables, Couches, Counters or Fixtures"
+            >
+              <Plus className="w-5 h-5 stroke-[2.5]" />
+              <span>Add</span>
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setRoomShapeModalOpen(true, 'presets');
+              }}
+              className="min-h-[44px] flex items-center gap-1.5 text-sm font-bold px-3 rounded-xl text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-colors cursor-pointer flex-shrink-0"
+              title="Room walls and shape"
+            >
+              <Pentagon className="w-5 h-5" />
+              <span>Walls</span>
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setRoomShapeModalOpen(true, 'door');
+              }}
+              className="min-h-[44px] flex items-center gap-1.5 text-sm font-bold px-3 rounded-xl text-amber-800 bg-amber-50 hover:bg-amber-100 transition-colors cursor-pointer flex-shrink-0"
+              title="Room doors and entrances"
+            >
+              <DoorOpen className="w-5 h-5 text-amber-600" />
+              <span>Doors</span>
+            </button>
+          </>
+        )}
+        <div className="ml-auto">
+          <CanvasOptionsMenu
+            gridSnap={appMode === 'edit' ? gridSnap : undefined}
+            onToggleGridSnap={appMode === 'edit' ? toggleGridSnap : undefined}
+            showLabels={showLabels}
+            onToggleLabels={toggleShowLabels}
+            showDimensions={showDimensions}
+            onToggleDimensions={toggleShowDimensions}
+            onRecenter={fitRoomToViewport}
+            isFullscreen={isBrowserFullscreen}
+            onToggleFullscreen={toggleBrowserFullscreen}
+          />
         </div>
-      )}
-
-      {/* Clean Edit Toolbar (Only visible when user actively enters Edit Mode) */}
-      {appMode === 'edit' && (
-        <div
-          data-toolbar="edit-controls"
-          onMouseDown={(e) => e.stopPropagation()}
-          onTouchStart={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-          className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20 flex items-center gap-1.5 bg-white/95 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-slate-200 shadow-md text-slate-700"
-        >
-          <button
-            onMouseDown={(e) => e.stopPropagation()}
-            onTouchStart={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              setFurnitureLibraryOpen(true);
-            }}
-            className="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-xl text-white bg-blue-600 hover:bg-blue-700 shadow-xs transition-colors cursor-pointer"
-            title="Add Furniture, Tables, Couches, Counters or Fixtures"
-          >
-            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-            <span>Add Item</span>
-          </button>
-          <div className="w-px h-4 bg-slate-200" />
-          <button
-            onMouseDown={(e) => e.stopPropagation()}
-            onTouchStart={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              setRoomShapeModalOpen(true, 'presets');
-            }}
-            className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer"
-            title="Configure Room Walls & Shape"
-          >
-            <Pentagon className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Room Shape</span>
-          </button>
-          <button
-            onMouseDown={(e) => e.stopPropagation()}
-            onTouchStart={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              setRoomShapeModalOpen(true, 'door');
-            }}
-            className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-amber-700 hover:bg-amber-50 transition-colors cursor-pointer"
-            title="Room Doors & Entrances"
-          >
-            <DoorOpen className="w-3.5 h-3.5 text-amber-600" />
-            <span className="hidden sm:inline">Doors ({roomDoors.length})</span>
-          </button>
-          <button
-            onClick={async () => {
-              if (room) {
-                await rotateRoom90Clockwise(room.id);
-                fitRoomToViewport();
-              }
-            }}
-            className="hidden sm:flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
-            title="Rotate Room 90° Clockwise"
-          >
-            <RotateCw className="w-3.5 h-3.5 text-blue-600" />
-            <span className="hidden sm:inline">Rotate 90°</span>
-          </button>
-          <button
-            onClick={async () => {
-              if (room) {
-                await mirrorRoom(room.id, 'horizontal');
-                fitRoomToViewport();
-              }
-            }}
-            className="hidden sm:flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
-            title="Mirror Horizontally (Flip Left ↔ Right)"
-          >
-            <FlipHorizontal className="w-3.5 h-3.5 text-blue-600" />
-            <span className="hidden md:inline">Flip ↔</span>
-          </button>
-          <button
-            onClick={async () => {
-              if (room) {
-                await mirrorRoom(room.id, 'vertical');
-                fitRoomToViewport();
-              }
-            }}
-            className="hidden sm:flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
-            title="Mirror Vertically (Flip Top ↕ Bottom)"
-          >
-            <FlipVertical className="w-3.5 h-3.5 text-blue-600" />
-            <span className="hidden md:inline">Flip ↕</span>
-          </button>
-          <div className="w-px h-4 bg-slate-200" />
-          <button
-            onClick={toggleGridSnap}
-            className={`p-1.5 rounded-xl transition-colors cursor-pointer ${
-              gridSnap ? 'bg-blue-50 text-blue-600 border border-blue-200' : 'hover:bg-slate-100 text-slate-400'
-            }`}
-            title={gridSnap ? 'Snap to Grid: ON' : 'Snap to Grid: OFF'}
-          >
-            <Grid className="w-4 h-4" />
-          </button>
-          <button
-            onClick={toggleShowLabels}
-            className={`p-1.5 rounded-xl transition-colors cursor-pointer ${
-              showLabels ? 'bg-blue-50 text-blue-600 border border-blue-200' : 'hover:bg-slate-100 text-slate-400'
-            }`}
-            title={showLabels ? 'Labels: ON' : 'Labels: OFF'}
-          >
-            <Eye className="w-4 h-4" />
-          </button>
-          <button
-            onClick={toggleShowDimensions}
-            className={`p-1.5 rounded-xl transition-colors cursor-pointer ${
-              showDimensions ? 'bg-blue-50 text-blue-600 border border-blue-200' : 'hover:bg-slate-100 text-slate-400'
-            }`}
-            title={showDimensions ? 'Dimensions: ON' : 'Dimensions: OFF'}
-          >
-            <Ruler className="w-4 h-4" />
-          </button>
-          <button
-            onClick={fitRoomToViewport}
-            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer"
-            title="Recenter & Fit Room View"
-          >
-            <Focus className="w-4 h-4" />
-          </button>
-          <button
-            onClick={toggleBrowserFullscreen}
-            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer"
-            title={isBrowserFullscreen ? "Exit Fullscreen (F11 / Esc)" : "Fullscreen Canvas (F11)"}
-          >
-            {isBrowserFullscreen ? (
-              <Minimize2 className="w-4 h-4 text-blue-600" />
-            ) : (
-              <Maximize2 className="w-4 h-4 text-slate-500" />
-            )}
-          </button>
-        </div>
-      )}
+      </div>
 
       {/* Selected Furniture Controls Toolbar (Only in Edit Mode) */}
       {selectedFurnitureId && appMode === 'edit' && (() => {
@@ -1507,6 +1382,37 @@ export const FloorCanvas: React.FC = () => {
           {/* Interactive Door Drag & Quick Edit Badges for All Doors (Edit Mode) */}
           {doorsWithGeo.map(({ door, geo }) => {
             const isThisDoorDragging = draggingDoorId === door.id;
+            const isActiveDoor = activeDoorId === door.id || isThisDoorDragging;
+            if (!isActiveDoor) {
+              // Small marker: one clear tap target, out of the way of the furniture
+              return (
+                <button
+                  key={`badge-${door.id}`}
+                  type="button"
+                  aria-label={`${door.label || 'Door'}: tap to edit`}
+                  title={door.label || 'Door'}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedFurnitureId(null);
+                    setActiveDoorId(door.id || null);
+                  }}
+                  style={{
+                    left: `${geo.badgePos.x}px`,
+                    top: `${geo.badgePos.y}px`,
+                    transform: `translate(-50%, -50%) scale(${1 / zoom})`,
+                  }}
+                  className={`absolute z-35 w-11 h-11 flex items-center justify-center select-none ${
+                    appMode === 'edit' ? 'pointer-events-auto' : 'invisible pointer-events-none'
+                  }`}
+                >
+                  <span className="w-7 h-7 rounded-full bg-slate-900/90 border-2 border-amber-400 shadow-lg flex items-center justify-center">
+                    <DoorOpen className="w-4 h-4 text-amber-400" />
+                  </span>
+                </button>
+              );
+            }
             return (
               <div
                 key={`badge-${door.id}`}
@@ -1537,7 +1443,7 @@ export const FloorCanvas: React.FC = () => {
                       if (hasDoorDragged.current) return;
                       setRoomShapeModalOpen(true, 'door');
                     }}
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-white/20 cursor-grab active:cursor-grabbing transition-colors"
+                    className="flex items-center gap-1.5 px-2.5 min-h-[36px] rounded-lg hover:bg-white/20 cursor-grab active:cursor-grabbing transition-colors"
                     title={`${door.label || 'Door'} (${door.width || 2}m wide, ${door.offset}m from corner on ${door.wall} wall) — Click to configure`}
                   >
                     <DoorOpen className="w-3.5 h-3.5 text-amber-400" />
@@ -1555,10 +1461,10 @@ export const FloorCanvas: React.FC = () => {
                           e.stopPropagation();
                           if (room) setConnectRoomModalOpen(true, { roomId: room.id, doorId: door.id || '' });
                         }}
-                        className="w-5 h-5 rounded-full bg-emerald-500/30 hover:bg-emerald-500/50 border border-emerald-400/40 flex items-center justify-center cursor-pointer transition-all active:scale-95 ml-0.5 flex-shrink-0"
+                        className="w-9 h-9 rounded-full bg-emerald-500/30 hover:bg-emerald-500/50 border border-emerald-400/40 flex items-center justify-center cursor-pointer transition-all active:scale-95 ml-0.5 flex-shrink-0"
                         title={`Connected to ${targetRoom?.name || 'Room'} — Click to edit or disconnect`}
                       >
-                        <Link className="w-2.5 h-2.5 text-emerald-300" />
+                        <Link className="w-4 h-4 text-emerald-300" />
                       </button>
                     );
                   })() : (
@@ -1569,10 +1475,10 @@ export const FloorCanvas: React.FC = () => {
                         e.stopPropagation();
                         if (room) setConnectRoomModalOpen(true, { roomId: room.id, doorId: door.id || '' });
                       }}
-                      className="w-5 h-5 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center transition-all active:scale-95 shadow-md cursor-pointer ml-0.5 flex-shrink-0"
+                      className="w-9 h-9 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center transition-all active:scale-95 shadow-md cursor-pointer ml-0.5 flex-shrink-0"
                       title="Connect another room to this doorway (+)"
                     >
-                      <Plus className="w-3 h-3 stroke-[3]" />
+                      <Plus className="w-4 h-4 stroke-[3]" />
                     </button>
                   )}
                 </div>
