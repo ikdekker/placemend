@@ -434,7 +434,7 @@ export const RoomShapeModal: React.FC = () => {
   const [boundaryWidth, setBoundaryWidth] = useState<number>(24);
   const [boundaryHeight, setBoundaryHeight] = useState<number>(18);
   const [scaleShapeWithBoundary, setScaleShapeWithBoundary] = useState<boolean>(true);
-  const [wallStepCm, setWallStepCm] = useState<number>(5);
+  const [wallStepCm, setWallStepCm] = useState<number>(10);
   const [showCornerEditor, setShowCornerEditor] = useState<boolean>(false);
 
   // Move the selected corner by the chosen step (centimeter-exact), growing the boundary if needed
@@ -1547,11 +1547,11 @@ export const RoomShapeModal: React.FC = () => {
                             </span>
                             <button
                               type="button"
-                              onClick={() => setWallStepCm(wallStepCm === 1 ? 5 : wallStepCm === 5 ? 10 : wallStepCm === 10 ? 50 : 1)}
+                              onClick={() => setWallStepCm(wallStepCm === 10 ? 50 : wallStepCm === 50 ? 100 : 10)}
                               className="ml-auto min-h-[36px] px-3 rounded-lg bg-slate-800 border border-slate-600 text-xs font-bold text-sky-200 cursor-pointer"
                               aria-label={`Nudge step ${wallStepCm} cm, tap to change`}
                             >
-                              Step {wallStepCm} cm
+                              Step {wallStepCm === 100 ? "1 m" : `${wallStepCm} cm`}
                             </button>
                           </div>
                           <div className="flex gap-1.5">
@@ -1827,8 +1827,8 @@ export const RoomShapeModal: React.FC = () => {
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-500 leading-snug">Measure each wall and type its length. Neighbouring walls follow.</p>
-                  <div className="grid grid-cols-4 gap-1.5" role="radiogroup" aria-label="Step for the plus and minus buttons">
-                    {[1, 5, 10, 50].map((cm) => (
+                  <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="Step for the plus and minus buttons">
+                    {[10, 50, 100].map((cm) => (
                       <button
                         key={cm}
                         type="button"
@@ -1837,7 +1837,7 @@ export const RoomShapeModal: React.FC = () => {
                         onClick={() => setWallStepCm(cm)}
                         className={`min-h-[40px] rounded-lg text-xs font-bold cursor-pointer ${wallStepCm === cm ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
                       >
-                        {cm} cm
+                        {cm === 100 ? "1 m" : `${cm} cm`}
                       </button>
                     ))}
                   </div>
