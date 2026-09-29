@@ -20,7 +20,10 @@ import {
   Trash2, 
   Layers,
   Sparkles,
-  ArrowRight,
+  ArrowRight as ArrowRightIcon,
+  ArrowLeft,
+  ArrowUp,
+  ArrowDown,
   Maximize2,
   Minimize2,
   FlipHorizontal,
@@ -434,6 +437,19 @@ export const RoomShapeModal: React.FC = () => {
   const [wallStepCm, setWallStepCm] = useState<number>(5);
   const [showCornerEditor, setShowCornerEditor] = useState<boolean>(false);
 
+  // Move the selected corner by the chosen step (centimeter-exact), growing the boundary if needed
+  const nudgeCorner = (dx: number, dy: number) => {
+    if (selectedCornerIdx === null) return;
+    const step = wallStepCm / 100;
+    const next = customPoints.map((p, i) =>
+      i === selectedCornerIdx ? { x: Math.max(0, roundCm(p.x + dx * step)), y: Math.max(0, roundCm(p.y + dy * step)) } : p
+    );
+    setCustomPoints(next);
+    const bounds = pointsBounds(next);
+    if (bounds.width > boundaryWidth) setBoundaryWidth(bounds.width);
+    if (bounds.height > boundaryHeight) setBoundaryHeight(bounds.height);
+  };
+
   // Change one wall to an exact length; the room boundary follows the new shape
   const applyWallLength = (wallIndex: number, meters: number) => {
     if (!(meters > 0)) return;
@@ -534,30 +550,69 @@ export const RoomShapeModal: React.FC = () => {
     }
   }, [room, isRoomShapeModalOpen, hasInitializedCustom, hasInitializedDoors]);
 
-  // Convert screen coordinates to SVG grid units for custom polygon vertex dragging
-  const getSvgGridCoords = (clientX: number, clientY: number): { x: number; y: number } | null => {
-    if (!customSvgRef.current || !room) return null;
+  // Un-snapped position of a screen point in room meters
+  const getSvgRaw = (clientX: number, clientY: number): { x: number; y: number } | null => {
+    if (!customSvgRef.current) return null;
     const svg = customSvgRef.current;
     const pt = svg.createSVGPoint();
     pt.x = clientX;
     pt.y = clientY;
     const ctm = svg.getScreenCTM();
     if (!ctm) return null;
-    const transformed = pt.matrixTransform(ctm.inverse());
+    const t = pt.matrixTransform(ctm.inverse());
+    return { x: t.x, y: t.y };
+  };
+
+  const clampSnapPoint = (x: number, y: number) => {
     const limitX = Math.max(boundaryWidth, ...(customPoints.length > 0 ? customPoints.map((p) => p.x) : [boundaryWidth]));
     const limitY = Math.max(boundaryHeight, ...(customPoints.length > 0 ? customPoints.map((p) => p.y) : [boundaryHeight]));
     return {
-      x: Math.max(0, Math.min(limitX, snapTo(transformed.x, 0.1))),
-      y: Math.max(0, Math.min(limitY, snapTo(transformed.y, 0.1))),
+      x: Math.max(0, Math.min(limitX, snapTo(x, 0.1))),
+      y: Math.max(0, Math.min(limitY, snapTo(y, 0.1))),
     };
   };
 
-  const handleVertexPointerDown = (idx: number, e: React.PointerEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
+  // A drag keeps the offset between finger and corner, and only starts after a small movement,
+  // so tapping a corner selects it instead of teleporting it under the finger.
+  const cornerDragRef = useRef<{ idx: number; startX: number; startY: number; offX: number; offY: number; moved: boolean } | null>(null);
+
+  const startCornerDrag = (idx: number, e: React.PointerEvent) => {
+    const p = customPoints[idx];
+    const raw = getSvgRaw(e.clientX, e.clientY);
+    if (!p || !raw) return;
+    cornerDragRef.current = { idx, startX: e.clientX, startY: e.clientY, offX: p.x - raw.x, offY: p.y - raw.y, moved: false };
     setSelectedCornerIdx(idx);
     setTargetEdgeIdx(idx);
     setDraggingPointIdx(idx);
+  };
+
+  // One decision for the whole stage: the NEAREST corner (or wall '+') within ~30 screen pixels wins.
+  // Separate per-corner touch circles overlapped in small rooms and the wrong corner was grabbed.
+  const handleStagePointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    const svg = customSvgRef.current;
+    const ctm = svg?.getScreenCTM();
+    if (!svg || !ctm || customPoints.length === 0) return;
+    const toScreen = (x: number, y: number) => ({ x: x * ctm.a + y * ctm.c + ctm.e, y: x * ctm.b + y * ctm.d + ctm.f });
+
+    let best: { kind: 'corner' | 'plus'; idx: number; dist: number } | null = null;
+    customPoints.forEach((p, idx) => {
+      const sp = toScreen(p.x, p.y);
+      const dist = Math.hypot(e.clientX - sp.x, e.clientY - sp.y);
+      if (dist <= 32 && (!best || dist < best.dist)) best = { kind: 'corner', idx, dist };
+    });
+    customPoints.forEach((p1, idx) => {
+      const p2 = customPoints[(idx + 1) % customPoints.length];
+      if (Math.hypot(p2.x - p1.x, p2.y - p1.y) < 2.5) return; // same rule as the visible '+'
+      const sp = toScreen((p1.x + p2.x) / 2, (p1.y + p2.y) / 2);
+      const dist = Math.hypot(e.clientX - sp.x, e.clientY - sp.y) + 6; // a corner wins a tie
+      if (dist <= 30 && (!best || dist < best.dist)) best = { kind: 'plus', idx, dist };
+    });
+    if (!best) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const target = best as { kind: 'corner' | 'plus'; idx: number; dist: number };
+    if (target.kind === 'corner') startCornerDrag(target.idx, e);
+    else handleStartAddPointAtEdge(target.idx, e);
   };
 
   // Global pointer listeners while dragging a vertex circle
@@ -565,8 +620,15 @@ export const RoomShapeModal: React.FC = () => {
     if (draggingPointIdx === null || !room) return;
 
     const handlePointerMove = (e: PointerEvent) => {
-      const coords = getSvgGridCoords(e.clientX, e.clientY);
-      if (!coords) return;
+      const drag = cornerDragRef.current;
+      if (!drag) return;
+      if (!drag.moved) {
+        if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 6) return; // a tap only selects
+        drag.moved = true;
+      }
+      const raw = getSvgRaw(e.clientX, e.clientY);
+      if (!raw) return;
+      const coords = clampSnapPoint(raw.x + drag.offX, raw.y + drag.offY);
       setCustomPoints((prev) => {
         if (!prev[draggingPointIdx] || (prev[draggingPointIdx].x === coords.x && prev[draggingPointIdx].y === coords.y)) {
           return prev;
@@ -578,7 +640,10 @@ export const RoomShapeModal: React.FC = () => {
     };
 
     const handlePointerUp = () => {
+      const moved = cornerDragRef.current?.moved;
+      cornerDragRef.current = null;
       setDraggingPointIdx(null);
+      if (!moved) return; // nothing was dragged: leave the room's size alone
       setCustomPoints((current) => {
         if (current.length >= 3) {
           const maxX = Math.max(...current.map((p) => p.x));
@@ -1081,7 +1146,7 @@ export const RoomShapeModal: React.FC = () => {
                     className={
                       isStageFullscreen
                         ? 'fixed inset-0 z-[70] bg-slate-950 flex flex-col select-none overflow-hidden animate-in fade-in duration-150'
-                        : 'flex-1 min-h-[300px] sm:min-h-[360px] lg:min-h-0 flex flex-col bg-slate-950 rounded-2xl border border-slate-800 relative overflow-hidden shadow-inner'
+                        : 'flex-1 min-h-[460px] lg:min-h-0 flex flex-col bg-slate-950 rounded-2xl border border-slate-800 relative overflow-hidden shadow-inner'
                     }
                   >
                     {/* Blueprint Stage Top Bar with Quick Transforms & Stage Fullscreen */}
@@ -1095,28 +1160,8 @@ export const RoomShapeModal: React.FC = () => {
                           ({boundaryWidth}m × {boundaryHeight}m boundary)
                         </span>
                         <span className="hidden sm:inline px-2 py-0.5 rounded-md bg-slate-800 text-sky-300 font-mono text-[10px] border border-slate-700">
-                          1m Grid Snap
+                          10 cm snap
                         </span>
-                        {selectedCornerIdx !== null && customPoints[selectedCornerIdx] && (
-                          <div className="flex items-center gap-1.5 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-lg">
-                            <span className="text-amber-300 font-mono text-[10px] font-bold">
-                              Corner #{selectedCornerIdx + 1}: ({customPoints[selectedCornerIdx].x}m, {customPoints[selectedCornerIdx].y}m)
-                            </span>
-                            {customPoints.length > 3 ? (
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteCustomPoint(selectedCornerIdx)}
-                                className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/25 hover:bg-rose-600 text-rose-200 hover:text-white text-[10px] font-bold border border-rose-500/40 transition-all active:scale-95 cursor-pointer ml-0.5"
-                                title="Delete this corner point (or press Backspace/Delete)"
-                              >
-                                <Trash2 className="w-2.5 h-2.5" />
-                                <span>Delete Point</span>
-                              </button>
-                            ) : (
-                              <span className="text-[9px] text-slate-500 italic ml-0.5">Min 3 points</span>
-                            )}
-                          </div>
-                        )}
                         {(maxX > boundaryWidth || maxY > boundaryHeight) && (
                           <button
                             type="button"
@@ -1210,6 +1255,7 @@ export const RoomShapeModal: React.FC = () => {
                     <div className="flex-1 w-full min-h-0 relative flex items-center justify-center p-3 select-none touch-none overflow-hidden">
                       <svg
                         ref={customSvgRef}
+                        onPointerDown={handleStagePointerDown}
                         className="w-full h-full select-none touch-none max-h-full"
                         viewBox={stageViewBox}
                         preserveAspectRatio="xMidYMid meet"
@@ -1357,8 +1403,7 @@ export const RoomShapeModal: React.FC = () => {
                               key={`plus-handle-${idx}`}
                               data-plus-edge={idx}
                               className="cursor-pointer group select-none touch-none"
-                              onPointerDown={(e) => handleStartAddPointAtEdge(idx, e)}
-                              onClick={(e) => e.stopPropagation()}
+                              pointerEvents="none"
                             >
                               <title>Add corner point on Wall #{idx + 1}</title>
                               <circle
@@ -1403,8 +1448,8 @@ export const RoomShapeModal: React.FC = () => {
                             <g
                               key={`vertex-${idx}`}
                               data-vertex-index={idx}
-                              onPointerDown={(e) => handleVertexPointerDown(idx, e)}
-                              className="cursor-grab active:cursor-grabbing select-none touch-none"
+                              pointerEvents="none"
+                              className="select-none touch-none"
                             >
                               {/* Generous Hit Target for effortless corner grabbing */}
                               <circle
@@ -1452,8 +1497,6 @@ export const RoomShapeModal: React.FC = () => {
                                 const isNearTop = p.y < 3;
                                 const tooltipY = isNearTop ? p.y + 1.6 * vScale : p.y - 2.8 * vScale;
                                 const textY = isNearTop ? p.y + 2.7 * vScale : p.y - 1.7 * vScale;
-                                const deleteY = isNearTop ? p.y + 2.4 * vScale : p.y - 2.0 * vScale;
-                                const deleteTextY = isNearTop ? p.y + 2.7 * vScale : p.y - 1.7 * vScale;
 
                                 return (
                                   <g>
@@ -1481,53 +1524,6 @@ export const RoomShapeModal: React.FC = () => {
                                       </text>
                                     </g>
 
-                                    {/* On-Canvas Delete Point Button ('✕' badge) */}
-                                    {customPoints.length > 3 && (
-                                      <g
-                                        data-delete-corner={idx}
-                                        className="cursor-pointer group"
-                                        onPointerDown={(e) => {
-                                          e.stopPropagation();
-                                          e.preventDefault();
-                                          handleDeleteCustomPoint(idx);
-                                        }}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleDeleteCustomPoint(idx);
-                                        }}
-                                      >
-                                        <title>Delete Corner #{idx + 1}</title>
-                                        {/* Generous Hit Zone */}
-                                        <circle
-                                          cx={p.x + 3.0 * vScale}
-                                          cy={deleteY}
-                                          r={1.5 * vScale}
-                                          fill="transparent"
-                                        />
-                                        {/* Red Circle Button */}
-                                        <circle
-                                          cx={p.x + 3.0 * vScale}
-                                          cy={deleteY}
-                                          r={0.85 * vScale}
-                                          fill="#ef4444"
-                                          stroke="#ffffff"
-                                          strokeWidth={0.25 * vScale}
-                                          className="group-hover:fill-rose-700 transition-colors shadow-lg"
-                                        />
-                                        {/* '✕' icon */}
-                                        <text
-                                          x={p.x + 3.0 * vScale}
-                                          y={deleteTextY}
-                                          fill="#ffffff"
-                                          fontSize={1.0 * vScale}
-                                          fontWeight="900"
-                                          textAnchor="middle"
-                                          pointerEvents="none"
-                                        >
-                                          ×
-                                        </text>
-                                      </g>
-                                    )}
                                   </g>
                                 );
                               })()}
@@ -1535,6 +1531,60 @@ export const RoomShapeModal: React.FC = () => {
                           );
                         })}
                       </svg>
+
+                      {/* Selected corner: exact position, nudge arrows and delete. It floats over the stage,
+                          so selecting a corner never changes the layout (a taller header used to shift the
+                          drawing under the finger). */}
+                      {selectedCornerIdx !== null && customPoints[selectedCornerIdx] && (
+                        <div
+                          onPointerDown={(e) => e.stopPropagation()}
+                          className="absolute bottom-3 left-3 right-3 z-20 mx-auto max-w-md bg-slate-900/95 backdrop-blur-md border border-amber-500/40 rounded-2xl p-2 flex flex-col gap-1.5 shadow-2xl"
+                        >
+                          <div className="flex items-center gap-2 px-1">
+                            <span className="text-xs font-black text-amber-300">Corner {selectedCornerIdx + 1}</span>
+                            <span className="text-xs font-mono text-slate-300">
+                              X {customPoints[selectedCornerIdx].x} m · Y {customPoints[selectedCornerIdx].y} m
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setWallStepCm(wallStepCm === 1 ? 5 : wallStepCm === 5 ? 10 : wallStepCm === 10 ? 50 : 1)}
+                              className="ml-auto min-h-[36px] px-3 rounded-lg bg-slate-800 border border-slate-600 text-xs font-bold text-sky-200 cursor-pointer"
+                              aria-label={`Nudge step ${wallStepCm} cm, tap to change`}
+                            >
+                              Step {wallStepCm} cm
+                            </button>
+                          </div>
+                          <div className="flex gap-1.5">
+                            {([
+                              ['Left', -1, 0, ArrowLeft],
+                              ['Up', 0, -1, ArrowUp],
+                              ['Down', 0, 1, ArrowDown],
+                              ['Right', 1, 0, ArrowRightIcon],
+                            ] as const).map(([label, dx, dy, Icon]) => (
+                              <button
+                                key={label}
+                                type="button"
+                                onClick={() => nudgeCorner(dx, dy)}
+                                aria-label={`Move corner ${label.toLowerCase()} ${wallStepCm} cm`}
+                                className="flex-1 min-h-[48px] rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white flex items-center justify-center cursor-pointer active:scale-95"
+                              >
+                                <Icon className="w-5 h-5" />
+                              </button>
+                            ))}
+                            {customPoints.length > 3 && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteCustomPoint(selectedCornerIdx)}
+                                aria-label="Delete this corner"
+                                className="min-h-[48px] px-3 rounded-xl bg-rose-500/20 hover:bg-rose-600 border border-rose-500/50 text-rose-200 hover:text-white flex items-center justify-center gap-1 text-xs font-bold cursor-pointer active:scale-95"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
 
                       {/* Floating Controls HUD in Fullscreen Stage Mode */}
                       {isStageFullscreen && showFullscreenHud && (
