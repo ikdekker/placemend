@@ -553,26 +553,34 @@ export function snapFurniturePosition(
   roomH: number,
   polygonPoints?: Point2D[],
   gridSnapEnabled: boolean = true,
-  otherFurniture?: Array<{ x: number; y: number; width: number; length: number; rotation?: number }>
-): { x: number; y: number } {
+  otherFurniture?: Array<{ x: number; y: number; width: number; length: number; rotation?: number }>,
+  // Pull distance in meters. Callers on a touch screen pass ~16 screen pixels converted to meters;
+  // 0 turns the magnet off (e.g. for precise nudging).
+  snapThreshold: number = 0.2
+): { x: number; y: number; guideX?: number; guideY?: number } {
   // Rooms and furniture are measured in meters; the grid snaps to 10cm
   let x = gridSnapEnabled ? Math.round(targetX * 10) / 10 : targetX;
   let y = gridSnapEnabled ? Math.round(targetY * 10) / 10 : targetY;
 
-  // Magnetic snap threshold (20cm)
-  const snapThreshold = 0.2;
+  // Where the piece locked on (for drawing a guide line)
+  let guideX: number | undefined;
+  let guideY: number | undefined;
 
   // 1. Magnetic Wall Snap
   if (Math.abs(x) < snapThreshold) {
     x = 0; // Flush against left wall
+    guideX = 0;
   } else if (Math.abs(x - (roomW - furnW)) < snapThreshold) {
     x = Math.max(0, roomW - furnW); // Flush against right wall
+    guideX = roomW;
   }
 
   if (Math.abs(y) < snapThreshold) {
     y = 0; // Flush against top wall
+    guideY = 0;
   } else if (Math.abs(y - (roomH - furnL)) < snapThreshold) {
     y = Math.max(0, roomH - furnL); // Flush against bottom wall
+    guideY = roomH;
   }
 
   // 2. Modular Furniture-to-Furniture Edge Snapping (Snap flush to neighbor pieces to form L-shapes or rows)
@@ -592,18 +600,22 @@ export function snapFurniturePosition(
         // Snap to other's right edge (x = oRight)
         if (Math.abs(x - oRight) < snapThreshold) {
           x = oRight;
+          guideX = oRight;
         }
         // Snap to other's left edge (x + furnW = oLeft)
         else if (Math.abs((x + furnW) - oLeft) < snapThreshold) {
           x = oLeft - furnW;
+          guideX = oLeft;
         }
         // Collinear top alignment (y = oTop)
         if (Math.abs(y - oTop) < snapThreshold) {
           y = oTop;
+          guideY = oTop;
         }
         // Collinear bottom alignment (y + furnL = oBottom)
         else if (Math.abs((y + furnL) - oBottom) < snapThreshold) {
           y = oBottom - furnL;
+          guideY = oBottom;
         }
       }
 
@@ -613,18 +625,22 @@ export function snapFurniturePosition(
         // Snap to other's bottom edge (y = oBottom)
         if (Math.abs(y - oBottom) < snapThreshold) {
           y = oBottom;
+          guideY = oBottom;
         }
         // Snap to other's top edge (y + furnL = oTop)
         else if (Math.abs((y + furnL) - oTop) < snapThreshold) {
           y = oTop - furnL;
+          guideY = oTop;
         }
         // Collinear left alignment (x = oLeft)
         if (Math.abs(x - oLeft) < snapThreshold) {
           x = oLeft;
+          guideX = oLeft;
         }
         // Collinear right alignment (x + furnW = oRight)
         else if (Math.abs((x + furnW) - oRight) < snapThreshold) {
           x = oRight - furnW;
+          guideX = oRight;
         }
       }
     }
@@ -634,6 +650,8 @@ export function snapFurniturePosition(
   x = Math.max(0, Math.min(roomW - furnW, x));
   y = Math.max(0, Math.min(roomH - furnL, y));
 
+  const snappedX = x;
+  const snappedY = y;
   // If room is a non-rectangular polygon (e.g. chamfered, L-shaped), ensure furniture stays inside
   if (polygonPoints && polygonPoints.length >= 3) {
     if (!isRectInsidePolygon(x, y, furnW, furnL, polygonPoints)) {
@@ -675,5 +693,11 @@ export function snapFurniturePosition(
     }
   }
 
-  return { x, y };
+  // Only report a guide line if the piece is still where the magnet put it
+  return {
+    x,
+    y,
+    guideX: x === snappedX ? guideX : undefined,
+    guideY: y === snappedY ? guideY : undefined,
+  };
 }

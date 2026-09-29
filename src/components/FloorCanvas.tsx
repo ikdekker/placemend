@@ -6,17 +6,11 @@ import { Point2D } from '../types';
 import { FurnitureGraphic } from './FurnitureGraphic';
 import { useVisualSearch } from '../hooks/useVisualSearch';
 import { 
-  RotateCw, 
   RotateCcw,
-  Trash2, 
   Pentagon, 
   DoorOpen, 
-  FlipHorizontal, 
   MapPin,
   Plus,
-  Minus,
-  FolderOpen,
-  X,
   Link,
   ArrowRight,
   ArrowDownRight
@@ -25,8 +19,8 @@ import { getDoorSvgGeometry, getRoomDoors, snapFurniturePosition, getRoomWallSeg
 import { scheduleAutoSync } from '../services/apiSync';
 import { seedDemoDataIfEmpty, scheduleSeedIfEmpty } from '../db/sampleData';
 import { roundCm, snapTo, formatMeters } from '../utils/measure';
-import { MeterInput } from './MeterInput';
 import { CanvasOptionsMenu } from './CanvasOptionsMenu';
+import { FurniturePanel } from './FurniturePanel';
 
 export const FloorCanvas: React.FC = () => {
   const {
@@ -115,6 +109,10 @@ export const FloorCanvas: React.FC = () => {
   const [resizingFurnitureId, setResizingFurnitureId] = useState<string | null>(null);
   // Resize handles only when asked for: they sit on top of small pieces and turned moves into resizes
   const [dragResizeOn, setDragResizeOn] = useState(false);
+  // Height (px) of the open "Position" panel: the plan is fitted into the space above it
+  const [reservedBottom, setReservedBottom] = useState(0);
+  // Guide lines while dragging a piece that has snapped to a wall or a neighbour (meters)
+  const [dragGuides, setDragGuides] = useState<{ x?: number; y?: number } | null>(null);
   // Only the tapped door shows its full label/handles; the others stay small so they don't get in the way
   const [activeDoorId, setActiveDoorId] = useState<string | null>(null);
   useEffect(() => setDragResizeOn(false), [selectedFurnitureId]);
@@ -252,7 +250,7 @@ export const FloorCanvas: React.FC = () => {
   // Auto-fit room to viewport (statically locks and centers the room)
   const fitRoomToViewport = useCallback(() => {
     const containerW = containerRef.current?.clientWidth || (typeof window !== 'undefined' ? window.innerWidth : 412);
-    const containerH = containerRef.current?.clientHeight || (typeof window !== 'undefined' ? window.innerHeight - 120 : 700);
+    const containerH = (containerRef.current?.clientHeight || (typeof window !== 'undefined' ? window.innerHeight - 120 : 700)) - reservedBottom;
     if (containerW <= 50 || containerH <= 50) return;
 
     const rGridW = room?.gridWidth || 26;
@@ -264,23 +262,27 @@ export const FloorCanvas: React.FC = () => {
 
     const isMobile = window.innerWidth < 768;
     // Margins around the room (with generous breathing space for exterior doorway portals)
-    const padX = isMobile ? 160 : 200; // labels and portals extend past the walls
-    const padY = isMobile ? 280 : 200; // room for door portals above/below and the mobile nav
+    // View mode has big walk-through door buttons around the room; edit mode only small door markers
+    const editing = appMode === 'edit';
+    const padX = isMobile ? (editing ? 90 : 160) : 200; // labels and portals extend past the walls
+    // The top toolbar (about 76 px) floats over the plan on phones: keep the room below it
+    const topInset = isMobile && editing ? 76 : 0;
+    const padY = isMobile ? (editing ? (reservedBottom > 0 ? 50 : 120) : 280) : 200; // panel/nav below
 
     const scaleX = (containerW - padX) / roomW;
-    const scaleY = (containerH - padY) / roomH;
+    const scaleY = (containerH - topInset - padY) / roomH;
     // Rooms are in meters (32px/m), so small rooms need well over 1x to fill a phone screen
     const optimalZoom = Math.max(0.18, Math.min(2, Math.min(scaleX, scaleY)));
 
     const centeredX = (containerW - roomW * optimalZoom) / 2;
-    const centeredY = (containerH - roomH * optimalZoom) / 2;
+    const centeredY = topInset + (containerH - topInset - roomH * optimalZoom) / 2;
 
     setZoom(optimalZoom);
     setPanOffset({
       x: Math.round(centeredX),
       y: Math.round(centeredY),
     });
-  }, [room, setZoom, setPanOffset]);
+  }, [room, setZoom, setPanOffset, reservedBottom, appMode]);
 
   // Auto-fit on room change, appMode change, or fitViewTrigger
   useEffect(() => {
@@ -439,8 +441,11 @@ export const FloorCanvas: React.FC = () => {
           gridH,
           room?.polygonPoints,
           gridSnap,
-          otherFurns
+          otherFurns,
+          // ~16 screen pixels of pull, whatever the zoom (0.1 to 0.5 m)
+          Math.max(0.1, Math.min(0.5, 16 / (unitSize * zoom)))
         );
+        setDragGuides(snapped.guideX !== undefined || snapped.guideY !== undefined ? { x: snapped.guideX, y: snapped.guideY } : null);
 
         setDragLivePos({
           id: draggingFurnitureId,
@@ -596,6 +601,7 @@ export const FloorCanvas: React.FC = () => {
       }).then(() => scheduleAutoSync());
       setDragLivePos(null);
     }
+    setDragGuides(null);
 
     // If resizing furniture, commit new dimensions to DB
     if (resizingFurnitureId && resizeLiveDim && resizeLiveDim.id === resizingFurnitureId) {
@@ -809,10 +815,13 @@ export const FloorCanvas: React.FC = () => {
     }
   };
 
-  const adjustFurnitureDimension = (axis: 'w' | 'l', delta: number, e?: React.SyntheticEvent) => {
-    e?.stopPropagation();
-    e?.preventDefault();
-    return setFurnitureDimension(axis, (cur) => cur + delta);
+  // Move a piece to an exact spot (nudging, typed distances, align buttons); keeps it inside the room
+  const setFurniturePosition = async (id: string, x: number, y: number, rotated: boolean, dimW: number, dimL: number) => {
+    const fw = rotated ? dimL : dimW;
+    const fl = rotated ? dimW : dimL;
+    const clamped = snapFurniturePosition(x, y, fw, fl, gridW, gridH, room?.polygonPoints, false, undefined, 0);
+    await db.furniture.update(id, { 'position.x': roundCm(clamped.x), 'position.y': roundCm(clamped.y), updatedAt: Date.now() });
+    scheduleAutoSync();
   };
 
   // Delete selected furniture
@@ -956,195 +965,34 @@ export const FloorCanvas: React.FC = () => {
         </div>
       </div>
 
-      {/* Selected Furniture Controls Toolbar (Only in Edit Mode) */}
+      {/* Selection panel: big actions and precise position & size (Edit Mode) */}
       {selectedFurnitureId && appMode === 'edit' && (() => {
         const selectedFurn = furnitureList.find((f) => f.id === selectedFurnitureId);
         if (!selectedFurn) return null;
-        const furnW = (resizeLiveDim && resizeLiveDim.id === selectedFurn.id) ? resizeLiveDim.w : selectedFurn.dimension.width;
-        const furnL = (resizeLiveDim && resizeLiveDim.id === selectedFurn.id) ? resizeLiveDim.l : selectedFurn.dimension.length;
-        const furnRot = selectedFurn.position.rotation || 0;
+        const rotated = (selectedFurn.position.rotation || 0) % 180 !== 0;
         return (
-          <div
-            data-toolbar="furniture-controls"
-            onMouseDown={(e) => e.stopPropagation()}
-            onMouseUp={(e) => e.stopPropagation()}
-            onTouchStart={(e) => e.stopPropagation()}
-            onTouchMove={(e) => e.stopPropagation()}
-            onTouchEnd={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
-            onPointerUp={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
-            className="fixed bottom-[calc(max(env(safe-area-inset-bottom),8px)+84px)] md:bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5 sm:gap-2 bg-white/95 backdrop-blur-md px-3 sm:px-4 py-1.5 sm:py-2 rounded-2xl border border-slate-200 shadow-2xl text-slate-800 animate-in fade-in slide-in-from-bottom-2 duration-150 w-[calc(100vw-24px)] sm:w-auto max-w-[96vw] flex-wrap justify-center sm:flex-nowrap"
-          >
-            {/* Furniture Name */}
-            <span className="text-xs font-bold text-slate-900 truncate max-w-[120px] sm:max-w-xs flex-shrink-0">
-              {selectedFurn.name}
-            </span>
-
-            <div className="hidden sm:block w-px h-4 bg-slate-200 flex-shrink-0" />
-
-            {/* Rotate 90° */}
-            <button
-              onClick={rotateSelectedFurniture}
-              onMouseDown={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              onTouchStart={(e) => e.stopPropagation()}
-              onTouchEnd={(e) => e.stopPropagation()}
-              className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold cursor-pointer transition-colors active:scale-95 flex-shrink-0"
-              title="Rotate 90° Clockwise"
-            >
-              <RotateCw className="w-3.5 h-3.5 text-blue-600" />
-              <span>Rotate</span>
-            </button>
-
-            {/* Flip / Mirror ↔ */}
-            <button
-              onClick={flipSelectedFurniture}
-              onMouseDown={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              onTouchStart={(e) => e.stopPropagation()}
-              onTouchEnd={(e) => e.stopPropagation()}
-              className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 ${
-                selectedFurn.mirrored
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-              } rounded-xl font-bold cursor-pointer transition-colors active:scale-95 flex-shrink-0`}
-              title="Mirror / Flip Orientation (e.g. switch chaise lounge left ↔ right)"
-            >
-              <FlipHorizontal className={`w-3.5 h-3.5 ${selectedFurn.mirrored ? 'text-white' : 'text-indigo-600'}`} />
-              <span>Flip</span>
-            </button>
-
-            {/* Drag-resizing is opt-in: by default dragging a piece always moves it */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setDragResizeOn(!dragResizeOn);
-              }}
-              onMouseDown={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              onTouchStart={(e) => e.stopPropagation()}
-              onTouchEnd={(e) => e.stopPropagation()}
-              aria-pressed={dragResizeOn}
-              className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 ${
-                dragResizeOn ? 'bg-blue-600 text-white shadow-xs' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-              } rounded-xl font-bold cursor-pointer transition-colors active:scale-95 flex-shrink-0`}
-              title={dragResizeOn ? 'Stop resizing by dragging (dragging moves the piece again)' : 'Resize by dragging the corner and edges'}
-            >
-              <ArrowDownRight className={`w-3.5 h-3.5 ${dragResizeOn ? 'text-white' : 'text-indigo-600'}`} />
-              <span>{dragResizeOn ? 'Resizing' : 'Drag to resize'}</span>
-            </button>
-
-            <div className="w-px h-4 bg-slate-200 flex-shrink-0 hidden xs:block" />
-
-            {/* Quick Dimension Controls (Width x Length) */}
-            <div className="flex items-center gap-1.5 bg-slate-100/90 px-2 py-1 rounded-xl flex-shrink-0">
-              <span className="text-[10px] uppercase font-black tracking-wider text-slate-600 hidden sm:inline">Size:</span>
-              
-              {/* Width steppers */}
-              <div className="flex items-center gap-0.5">
-                <span className="text-[10px] font-bold text-slate-600">W</span>
-                <button
-                  onClick={(e) => adjustFurnitureDimension('w', -0.1, e)}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  className="w-7 h-7 flex items-center justify-center rounded-md bg-white hover:bg-slate-200 text-slate-700 shadow-2xs font-bold text-xs active:scale-90"
-                  title="Decrease Width (-10cm)"
-                >
-                  <Minus className="w-2.5 h-2.5" />
-                </button>
-                <MeterInput
-                  aria-label="Width in meters"
-                  value={furnW}
-                  min={0.1}
-                  max={30}
-                  onChange={(m) => setFurnitureDimension('w', m)}
-                  className="w-12 font-mono text-xs font-black text-slate-800 bg-white rounded-md px-1 py-1 text-center border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <button
-                  onClick={(e) => adjustFurnitureDimension('w', 0.1, e)}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  className="w-7 h-7 flex items-center justify-center rounded-md bg-white hover:bg-slate-200 text-slate-700 shadow-2xs font-bold text-xs active:scale-90"
-                  title="Increase Width (+10cm)"
-                >
-                  <Plus className="w-2.5 h-2.5" />
-                </button>
-              </div>
-
-              <span className="text-slate-300 font-bold">×</span>
-
-              {/* Length steppers */}
-              <div className="flex items-center gap-0.5">
-                <span className="text-[10px] font-bold text-slate-600">L</span>
-                <button
-                  onClick={(e) => adjustFurnitureDimension('l', -0.1, e)}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  className="w-7 h-7 flex items-center justify-center rounded-md bg-white hover:bg-slate-200 text-slate-700 shadow-2xs font-bold text-xs active:scale-90"
-                  title="Decrease Length (-10cm)"
-                >
-                  <Minus className="w-2.5 h-2.5" />
-                </button>
-                <MeterInput
-                  aria-label="Length in meters"
-                  value={furnL}
-                  min={0.1}
-                  max={30}
-                  onChange={(m) => setFurnitureDimension('l', m)}
-                  className="w-12 font-mono text-xs font-black text-slate-800 bg-white rounded-md px-1 py-1 text-center border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <button
-                  onClick={(e) => adjustFurnitureDimension('l', 0.1, e)}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  className="w-7 h-7 flex items-center justify-center rounded-md bg-white hover:bg-slate-200 text-slate-700 shadow-2xs font-bold text-xs active:scale-90"
-                  title="Increase Length (+10cm)"
-                >
-                  <Plus className="w-2.5 h-2.5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Manage Drawers & Items */}
-            <button
-              onClick={() => {
-                setAppMode('view');
-              }}
-              onMouseDown={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              onTouchStart={(e) => e.stopPropagation()}
-              onTouchEnd={(e) => e.stopPropagation()}
-              className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl font-bold cursor-pointer transition-colors active:scale-95 flex-shrink-0"
-              title="Open & Manage Drawers, Containers and Items inside this furniture"
-            >
-              <FolderOpen className="w-3.5 h-3.5 text-blue-600" />
-              <span>Manage</span>
-            </button>
-
-            {/* Delete Furniture */}
-            <button
-              onClick={deleteSelectedFurniture}
-              onMouseDown={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              onTouchStart={(e) => e.stopPropagation()}
-              onTouchEnd={(e) => e.stopPropagation()}
-              className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl font-bold cursor-pointer transition-colors active:scale-95 flex-shrink-0"
-              title="Delete Furniture"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Delete</span>
-            </button>
-
-            {/* Deselect */}
-            <button
-              onClick={() => setSelectedFurnitureId(null)}
-              onMouseDown={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              onTouchStart={(e) => e.stopPropagation()}
-              onTouchEnd={(e) => e.stopPropagation()}
-              className="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-xl cursor-pointer transition-colors flex-shrink-0"
-              title="Deselect Furniture"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
+          <FurniturePanel
+            key={selectedFurn.id}
+            name={selectedFurn.name}
+            x={selectedFurn.position.x}
+            y={selectedFurn.position.y}
+            width={selectedFurn.dimension.width}
+            length={selectedFurn.dimension.length}
+            rotated={rotated}
+            roomW={gridW}
+            roomH={gridH}
+            mirrored={!!selectedFurn.mirrored}
+            dragResizeOn={dragResizeOn}
+            onToggleDragResize={() => setDragResizeOn(!dragResizeOn)}
+            onRotate={() => rotateSelectedFurniture()}
+            onFlip={() => flipSelectedFurniture()}
+            onOpen={() => setAppMode('view')}
+            onDelete={() => deleteSelectedFurniture()}
+            onClose={() => setSelectedFurnitureId(null)}
+            onSetPosition={(x, y) => setFurniturePosition(selectedFurn.id, x, y, rotated, selectedFurn.dimension.width, selectedFurn.dimension.length)}
+            onSetSize={(axis, m) => setFurnitureDimension(axis, m)}
+            onReserve={setReservedBottom}
+          />
         );
       })()}
 
@@ -1551,6 +1399,18 @@ export const FloorCanvas: React.FC = () => {
               </React.Fragment>
             );
           })}
+
+          {/* Guide lines: where the piece being dragged locked on (wall or neighbour) */}
+          {dragGuides && (
+            <svg className="absolute inset-0 pointer-events-none z-30" style={{ overflow: 'visible' }} width={roomPixelW} height={roomPixelH}>
+              {dragGuides.x !== undefined && (
+                <line x1={dragGuides.x * unitSize} y1={-12 / zoom} x2={dragGuides.x * unitSize} y2={roomPixelH + 12 / zoom} stroke="#2563eb" strokeWidth={2 / zoom} strokeDasharray={`${6 / zoom} ${4 / zoom}`} />
+              )}
+              {dragGuides.y !== undefined && (
+                <line x1={-12 / zoom} y1={dragGuides.y * unitSize} x2={roomPixelW + 12 / zoom} y2={dragGuides.y * unitSize} stroke="#2563eb" strokeWidth={2 / zoom} strokeDasharray={`${6 / zoom} ${4 / zoom}`} />
+              )}
+            </svg>
+          )}
 
           {/* Furniture Elements */}
           {furnitureList.map((furn) => {
