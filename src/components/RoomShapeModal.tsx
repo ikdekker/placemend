@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { MeterInput } from './MeterInput';
+import { describeWalls, setWallLength, pointsBounds } from '../utils/wallEdit';
 import { roundCm, snapTo, formatMeters } from '../utils/measure';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
@@ -14,7 +15,8 @@ import {
   RotateCw, 
   DoorOpen, 
   Sliders, 
-  Plus, 
+  Plus,
+  Minus, 
   Trash2, 
   Layers,
   Sparkles,
@@ -429,6 +431,18 @@ export const RoomShapeModal: React.FC = () => {
   const [boundaryWidth, setBoundaryWidth] = useState<number>(24);
   const [boundaryHeight, setBoundaryHeight] = useState<number>(18);
   const [scaleShapeWithBoundary, setScaleShapeWithBoundary] = useState<boolean>(true);
+  const [wallStepCm, setWallStepCm] = useState<number>(5);
+  const [showCornerEditor, setShowCornerEditor] = useState<boolean>(false);
+
+  // Change one wall to an exact length; the room boundary follows the new shape
+  const applyWallLength = (wallIndex: number, meters: number) => {
+    if (!(meters > 0)) return;
+    const next = setWallLength(customPoints, wallIndex, meters);
+    const bounds = pointsBounds(next);
+    setCustomPoints(next);
+    setBoundaryWidth(bounds.width);
+    setBoundaryHeight(bounds.height);
+  };
 
   const handleUpdateBoundaryWidth = (newW: number) => {
     if (newW <= 0 || newW === boundaryWidth) return;
@@ -1751,6 +1765,88 @@ export const RoomShapeModal: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Walls: type the real length of each wall */}
+                <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Walls</span>
+                    </h4>
+                    <span className="text-[11px] font-mono text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md font-bold">
+                      {customPoints.length} walls
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-snug">Measure each wall and type its length. Neighbouring walls follow.</p>
+                  <div className="grid grid-cols-4 gap-1.5" role="radiogroup" aria-label="Step for the plus and minus buttons">
+                    {[1, 5, 10, 50].map((cm) => (
+                      <button
+                        key={cm}
+                        type="button"
+                        role="radio"
+                        aria-checked={wallStepCm === cm}
+                        onClick={() => setWallStepCm(cm)}
+                        className={`min-h-[40px] rounded-lg text-xs font-bold cursor-pointer ${wallStepCm === cm ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                      >
+                        {cm} cm
+                      </button>
+                    ))}
+                  </div>
+                  <div className="space-y-1.5">
+                    {describeWalls(customPoints).map((w) => {
+                      const sideLabel = w.side === 'slanted' ? 'Slanted wall' : w.side[0].toUpperCase() + w.side.slice(1) + ' wall';
+                      return (
+                        <div
+                          key={w.index}
+                          onClick={() => setSelectedCornerIdx(w.index)}
+                          className={`flex items-center gap-1.5 p-1.5 rounded-xl border ${selectedCornerIdx === w.index ? 'border-blue-400 bg-blue-50/70' : 'border-slate-200 bg-slate-50'}`}
+                        >
+                          <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-[11px] font-black flex items-center justify-center flex-shrink-0">{w.index + 1}</span>
+                          <span className="flex-1 min-w-0 text-xs font-bold text-slate-700 truncate">{sideLabel}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              applyWallLength(w.index, roundCm(w.length - wallStepCm / 100));
+                            }}
+                            aria-label={`Wall ${w.index + 1} shorter by ${wallStepCm} cm`}
+                            className="w-11 h-11 rounded-lg bg-white border border-slate-300 flex items-center justify-center cursor-pointer active:scale-95"
+                          >
+                            <Minus className="w-4 h-4" />
+                          </button>
+                          <MeterInput
+                            aria-label={`Length of wall ${w.index + 1} in meters`}
+                            value={w.length}
+                            min={0.2}
+                            max={200}
+                            onChange={(m) => applyWallLength(w.index, m)}
+                            className="w-[72px] h-11 text-center font-mono text-sm font-black bg-white rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              applyWallLength(w.index, roundCm(w.length + wallStepCm / 100));
+                            }}
+                            aria-label={`Wall ${w.index + 1} longer by ${wallStepCm} cm`}
+                            className="w-11 h-11 rounded-lg bg-white border border-slate-300 flex items-center justify-center cursor-pointer active:scale-95"
+                          >
+                            <Plus className="w-4 h-4" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {showCornerEditor ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setShowCornerEditor(false)}
+                      className="min-h-[44px] rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
+                    >
+                      Hide corner tools
+                    </button>
                 {/* 1. Wall Corner Manager Card */}
                 <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs flex flex-col gap-2">
                   <div className="flex items-center justify-between">
@@ -1882,6 +1978,16 @@ export const RoomShapeModal: React.FC = () => {
                     );
                   })}
                 </div>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowCornerEditor(true)}
+                    className="min-h-[44px] rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
+                  >
+                    Advanced: edit corner points
+                  </button>
+                )}
 
                 {/* 3. Preset Layout Override Card (The Single Button to Deliberately Override Architecture) */}
                 <div className="bg-amber-50/70 border border-amber-200/90 rounded-xl p-3 flex flex-col gap-2 shadow-xs">
