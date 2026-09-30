@@ -911,7 +911,11 @@ export const FloorCanvas: React.FC = () => {
         onMouseDown={(e) => e.stopPropagation()}
         onTouchStart={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
-        className="absolute top-3 left-3 right-3 sm:right-auto sm:top-4 sm:left-4 z-20 flex items-center gap-1.5 bg-white/95 backdrop-blur-md px-1.5 py-1.5 rounded-2xl border border-slate-200 shadow-md text-slate-700"
+        className={`absolute z-20 flex items-center gap-1.5 bg-white/95 backdrop-blur-md px-1.5 py-1.5 rounded-2xl border border-slate-200 shadow-md text-slate-700 ${
+          appMode === 'edit'
+            ? 'top-3 left-3 right-3 sm:right-auto sm:top-4 sm:left-4'
+            : 'top-3 right-3 sm:top-4 sm:right-4' // view mode: only the View menu, as a small corner button
+        }`}
       >
         {appMode === 'edit' && (
           <>
@@ -950,7 +954,7 @@ export const FloorCanvas: React.FC = () => {
             </button>
           </>
         )}
-        <div className="ml-auto">
+        <div className={appMode === 'edit' ? 'ml-auto' : ''}>
           <CanvasOptionsMenu
             gridSnap={appMode === 'edit' ? gridSnap : undefined}
             onToggleGridSnap={appMode === 'edit' ? toggleGridSnap : undefined}
