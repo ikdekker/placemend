@@ -23,7 +23,7 @@ import { MobileNav } from './components/MobileNav';
 import { seedDemoDataIfEmpty } from './db/sampleData';
 import { db } from './db/database';
 import { useAppStore } from './store/useAppStore';
-import { fetchCurrentUser } from './services/auth';
+import { fetchCurrentUser, loginWithSigninCode } from './services/auth';
 import { pullRemoteToLocal, getWorkspaceApiKey, setAutoSyncEnabled } from './services/apiSync';
 
 export function App() {
@@ -62,6 +62,22 @@ export function App() {
       // 1. Ensure baseline apartment layout is present locally
       await seedDemoDataIfEmpty();
 
+      // Back from Google's redirect sign-in: swap the one-time code for a session
+      const params = new URLSearchParams(window.location.search);
+      const signinCode = params.get('signin');
+      if (signinCode || params.get('signin_error')) {
+        window.history.replaceState(null, '', window.location.pathname + (params.get('invite') ? `?invite=${params.get('invite')}` : ''));
+        if (signinCode) {
+          try {
+            await loginWithSigninCode(signinCode);
+          } catch (err) {
+            window.alert((err as Error).message || 'Google sign-in failed. Please try again.');
+          }
+        } else {
+          window.alert('Google sign-in did not complete. Please try again.');
+        }
+      }
+
       // 2. Auto-validate current user session with server
       try {
         const user = await fetchCurrentUser();
@@ -91,11 +107,24 @@ export function App() {
       await initSharedIndex();
       await syncShared();
       // Opened from an invite link: show the shared room, or ask to sign in first
-      const invite = new URLSearchParams(window.location.search).get('invite');
+      // (remembered across the trip to Google's sign-in page)
+      let invite = new URLSearchParams(window.location.search).get('invite');
+      try {
+        invite = invite || sessionStorage.getItem('placemend_pending_invite');
+      } catch {
+        /* storage unavailable */
+      }
       if (invite && isMounted) {
         const shared = await db.rooms.filter((r) => r.shareId === invite).first();
+        const signedIn = getWorkspaceApiKey().startsWith('pm_usr_');
+        try {
+          if (shared || signedIn) sessionStorage.removeItem('placemend_pending_invite');
+          else sessionStorage.setItem('placemend_pending_invite', invite);
+        } catch {
+          /* storage unavailable */
+        }
         if (shared) useAppStore.getState().setSelectedRoomId(shared.id);
-        else if (!getWorkspaceApiKey().startsWith('pm_usr_')) useAppStore.getState().setAccountModalOpen(true);
+        else if (!signedIn) useAppStore.getState().setAccountModalOpen(true);
         window.history.replaceState(null, '', window.location.pathname);
       }
 

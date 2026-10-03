@@ -85,13 +85,22 @@ export async function saveServerAuthConfig(clientId: string): Promise<void> {
  * Sign in using Google ID Token credential
  */
 export async function loginWithGoogleToken(credential: string): Promise<User> {
+  return completeGoogleLogin({ credential });
+}
+
+/** After the redirect sign-in: exchange the one-time ?signin= code for the session */
+export async function loginWithSigninCode(code: string): Promise<User> {
+  return completeGoogleLogin({ code });
+}
+
+async function completeGoogleLogin(payload: { credential?: string; code?: string }): Promise<User> {
   const res = await fetch(`${API_BASE_URL}/auth/google.php`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Accept': 'application/json'
     },
-    body: JSON.stringify({ credential })
+    body: JSON.stringify(payload)
   });
 
   const data: AuthResponse = await res.json();

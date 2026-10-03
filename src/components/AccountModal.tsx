@@ -15,6 +15,7 @@ import {
   saveServerAuthConfig
 } from '../services/auth';
 import { 
+  API_BASE_URL,
   syncBidirectional, 
   pullRemoteToLocal,
   isAutoSyncEnabled, 
@@ -107,7 +108,7 @@ export const AccountModal: React.FC = () => {
     const renderGoogleBtn = () => {
       if (!isMounted) return;
       const google = (window as unknown as { google?: { accounts?: { id?: {
-        initialize: (config: { client_id: string; callback: (res: { credential?: string }) => void }) => void;
+        initialize: (config: { client_id: string; callback?: (res: { credential?: string }) => void; ux_mode?: 'popup' | 'redirect'; login_uri?: string }) => void;
         renderButton: (parent: HTMLElement, options: { theme?: string; size?: string; width?: string | number; text?: string; shape?: string }) => void;
       } } } }).google;
 
@@ -115,6 +116,10 @@ export const AccountModal: React.FC = () => {
         try {
           google.accounts.id.initialize({
             client_id: clientId,
+            // Redirect instead of a pop-up: the pop-up needs third-party cookies, which Firefox,
+            // Safari and in-app browsers block (Google then shows a bare "400" page)
+            ux_mode: 'redirect',
+            login_uri: `${API_BASE_URL}/auth/google.php`,
             callback: async (response) => {
               if (response.credential) {
                 setIsLoading(true);
