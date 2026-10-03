@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
+import { getShareMeta } from '../services/sharing';
 import { useVisualSearch } from '../hooks/useVisualSearch';
 import { scheduleSeedIfEmpty } from '../db/sampleData';
 import { 
@@ -41,13 +42,22 @@ export const Header: React.FC = () => {
   const rooms = useLiveQuery(async () => {
     if (selectedLocationId) {
       const locRooms = await db.rooms.where('locationId').equals(selectedLocationId).toArray();
-      if (locRooms.length > 0) return locRooms;
+      // rooms shared with you keep their owner's location: always list them too
+      const shared = await db.rooms.filter((r) => !!r.shareId && r.locationId !== selectedLocationId).toArray();
+      if (locRooms.length > 0) return [...locRooms, ...shared];
     }
     const all = await db.rooms.toArray();
     if (all.length > 0) return all;
     scheduleSeedIfEmpty();
     return [];
   }, [selectedLocationId]) || [];
+
+  // A room shared with you as view-only can't enter edit mode
+  const currentRoom = rooms.find((r) => r.id === selectedRoomId);
+  const viewOnlyRoom = getShareMeta(currentRoom?.shareId)?.role === 'view';
+  useEffect(() => {
+    if (viewOnlyRoom && appMode === 'edit') setAppMode('view');
+  }, [viewOnlyRoom, appMode, setAppMode]);
 
   // Auto-sync selectedRoomId if null/empty or if pointing to a non-existent room
   useEffect(() => {
@@ -105,7 +115,7 @@ export const Header: React.FC = () => {
             )}
             {rooms.map((room) => (
               <option key={room.id} value={room.id} className="bg-white text-slate-800 font-semibold">
-                {room.name}
+                {room.shareId ? `${room.name} · shared by ${getShareMeta(room.shareId)?.ownerName ?? 'contact'}` : room.name}
               </option>
             ))}
           </select>
@@ -191,6 +201,10 @@ export const Header: React.FC = () => {
 
           <button
             onClick={() => {
+              if (viewOnlyRoom) {
+                window.alert('This room is shared with you as view-only.');
+                return;
+              }
               setAppMode('edit');
               setSelectedFurnitureId(null);
             }}

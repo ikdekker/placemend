@@ -71,6 +71,7 @@ function handleSync(): void {
 
             foreach ($incomingList as $incoming) {
                 if (empty($incoming['id']) || !is_array($incoming)) continue;
+                if (!empty($incoming['shareId'])) continue; // belongs to someone else's shared room
                 $id = $incoming['id'];
 
                 // A stale copy of a deleted record (not edited since the delete) must not resurrect it

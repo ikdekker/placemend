@@ -49,6 +49,7 @@ export type Location = {
 
 export type Room = {
   id: string;
+  shareId?: string; // set on rooms someone else shared with this user (local only)
   locationId: string;
   name: string;
   color: string;
@@ -85,6 +86,7 @@ export type FurnitureShape = 'rectangle' | 'round' | 'l_shape' | 'zone';
 
 export type Furniture = {
   id: string;
+  shareId?: string; // set on rooms someone else shared with this user (local only)
   roomId: string;
   name: string;
   type: FurnitureType;
@@ -117,6 +119,7 @@ export type ContainerType =
 
 export type Container = {
   id: string;
+  shareId?: string; // set on rooms someone else shared with this user (local only)
   furnitureId: string;
   parentContainerId?: string;
   name: string;
@@ -133,6 +136,7 @@ export type Container = {
 
 export type Item = {
   id: string;
+  shareId?: string; // set on rooms someone else shared with this user (local only)
   containerId: string;
   name: string;
   description?: string;

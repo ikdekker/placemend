@@ -13,6 +13,8 @@ import { AddWithPhotoModal } from './components/AddWithPhotoModal';
 import { SetupGuide } from './components/SetupGuide';
 import { AccountModal } from './components/AccountModal';
 import { HistoryModal } from './components/HistoryModal';
+import { ShareRoomModal } from './components/ShareRoomModal';
+import { initSharedIndex, syncShared } from './services/sharing';
 import { ConnectRoomModal } from './components/ConnectRoomModal';
 import { MultiRoomOverviewModal } from './components/MultiRoomOverviewModal';
 import { SearchModal } from './components/SearchModal';
@@ -36,6 +38,7 @@ export function App() {
       const s = useAppStore.getState();
       const dialogs: [boolean, () => void][] = [
         [!!s.historyView, () => s.setHistoryView(null)],
+        [!!s.shareRoomId, () => s.setShareRoomId(null)],
         [s.isItemModalOpen, () => s.setItemModalOpen(false)],
         [s.isConnectRoomModalOpen, () => s.setConnectRoomModalOpen(false)],
         [s.isRoomShapeModalOpen, () => s.setRoomShapeModalOpen(false)],
@@ -84,6 +87,18 @@ export function App() {
         console.warn('Initial session validation / sync check:', err);
       }
 
+      // Rooms other people shared with this user
+      await initSharedIndex();
+      await syncShared();
+      // Opened from an invite link: show the shared room, or ask to sign in first
+      const invite = new URLSearchParams(window.location.search).get('invite');
+      if (invite && isMounted) {
+        const shared = await db.rooms.filter((r) => r.shareId === invite).first();
+        if (shared) useAppStore.getState().setSelectedRoomId(shared.id);
+        else if (!getWorkspaceApiKey().startsWith('pm_usr_')) useAppStore.getState().setAccountModalOpen(true);
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+
       // 3. Guarantee baseline apartment rooms exist even after cloud sync or logout
       const finalCount = await db.rooms.count();
       if (finalCount === 0) {
@@ -97,6 +112,19 @@ export function App() {
       isMounted = false;
     };
   }, [setCurrentUser]);
+
+  // Keep shared rooms fresh while the app is open
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (document.visibilityState === 'visible') void syncShared();
+    }, 120000);
+    const onVisible = () => document.visibilityState === 'visible' && void syncShared();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
 
   return (
     <div className="flex flex-col w-screen h-screen bg-slate-100 text-slate-800 overflow-hidden font-sans pb-16 md:pb-0 relative">
@@ -134,6 +162,7 @@ export function App() {
       <ConnectRoomModal />
       <MultiRoomOverviewModal />
       <HistoryModal />
+      <ShareRoomModal />
     </div>
   );
 }

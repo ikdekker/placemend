@@ -1,5 +1,6 @@
 import { db } from '../db/database';
 import { Furniture, Container, Item, Room, Location } from '../types';
+import { pushShared } from './sharing';
 
 const STORAGE_KEY = 'placemend_api_key';
 const AUTO_SYNC_KEY = 'placemend_auto_sync_enabled';
@@ -78,12 +79,17 @@ function savePendingDeletes(t: Tombstones): void {
 // Set while applying the server's own tombstones, so those deletes are not re-recorded
 let applyingRemoteDeletes = false;
 
+/** Remember that a record left this workspace (deleted, or moved into a room someone shared) */
+export function recordPendingDelete(name: TableName, id: string): void {
+  const pending = loadPendingDeletes();
+  pending[name] = { ...(pending[name] || {}), [id]: Date.now() };
+  savePendingDeletes(pending);
+}
+
 for (const name of SYNCED_TABLES) {
-  db.table(name).hook('deleting', (primKey) => {
+  db.table(name).hook('deleting', (primKey, obj) => {
     if (applyingRemoteDeletes) return;
-    const pending = loadPendingDeletes();
-    pending[name] = { ...(pending[name] || {}), [String(primKey)]: Date.now() };
-    savePendingDeletes(pending);
+    if (!obj?.shareId) recordPendingDelete(name, String(primKey)); // shared records: see sharing.ts
     scheduleAutoSync();
   });
 }
@@ -99,6 +105,7 @@ export function scheduleAutoSync(delayMs = 1200): void {
   autoSyncTimeout = setTimeout(async () => {
     try {
       await pushLocalToRemote();
+      await pushShared();
       console.log('Background cloud auto-sync completed.');
     } catch (e) {
       console.warn('Background auto-sync failed:', e);
@@ -128,12 +135,14 @@ export async function pushLocalToRemote(apiKey?: string): Promise<SyncResult> {
 
   try {
     const sentDeletes = loadPendingDeletes();
+    // Rooms others shared with us are synced with their owners (sharing.ts), never into our workspace
+    const own = <T extends { shareId?: string }>(rows: T[]) => rows.filter((r) => !r.shareId);
     const payload = {
       locations: await db.locations.toArray(),
-      rooms: await db.rooms.toArray(),
-      furniture: await db.furniture.toArray(),
-      containers: await db.containers.toArray(),
-      items: await db.items.toArray(),
+      rooms: own(await db.rooms.toArray()),
+      furniture: own(await db.furniture.toArray()),
+      containers: own(await db.containers.toArray()),
+      items: own(await db.items.toArray()),
       deleted: sentDeletes,
     };
 

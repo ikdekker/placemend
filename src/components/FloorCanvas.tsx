@@ -965,6 +965,7 @@ export const FloorCanvas: React.FC = () => {
             onRecenter={fitRoomToViewport}
             isFullscreen={isBrowserFullscreen}
             onToggleFullscreen={toggleBrowserFullscreen}
+            onShare={room ? () => useAppStore.getState().setShareRoomId(room.id) : undefined}
           />
         </div>
       </div>

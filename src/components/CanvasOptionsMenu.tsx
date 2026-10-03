@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Grid, Eye, Ruler, Focus, Maximize2, Minimize2, SlidersHorizontal, Check } from 'lucide-react';
+import { Grid, Eye, Ruler, Focus, Maximize2, Minimize2, SlidersHorizontal, Check, Users } from 'lucide-react';
 
 interface Props {
   /** Edit mode only: snapping while dragging */
@@ -12,6 +12,8 @@ interface Props {
   onRecenter: () => void;
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
+  /** Share the current room with contacts */
+  onShare?: () => void;
 }
 
 /**
@@ -28,6 +30,7 @@ export const CanvasOptionsMenu: React.FC<Props> = ({
   onRecenter,
   isFullscreen,
   onToggleFullscreen,
+  onShare,
 }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -93,6 +96,12 @@ export const CanvasOptionsMenu: React.FC<Props> = ({
             onClick: onToggleFullscreen,
             close: true,
           })}
+          {onShare && (
+            <>
+              <div className="h-px bg-slate-100 my-1" />
+              {row(<Users className="w-5 h-5" />, 'Share this room…', { onClick: onShare, close: true })}
+            </>
+          )}
         </div>
       )}
     </div>

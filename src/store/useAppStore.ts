@@ -56,6 +56,8 @@ export interface AppState {
   setMultiRoomOverviewOpen: (open: boolean) => void;
   // Change history sheet: all changes (recordId null) or those of one record
   historyView: { recordId: string | null; title?: string } | null;
+  shareRoomId: string | null;
+  setShareRoomId: (id: string | null) => void;
   setHistoryView: (view: { recordId: string | null; title?: string } | null) => void;
 
   // Search
@@ -150,6 +152,8 @@ export const useAppStore = create<AppState>((set) => ({
   isMultiRoomOverviewOpen: false,
   setMultiRoomOverviewOpen: (open) => set({ isMultiRoomOverviewOpen: open }),
   historyView: null,
+  shareRoomId: null,
+  setShareRoomId: (id) => set({ shareRoomId: id }),
   setHistoryView: (view) => set({ historyView: view }),
   searchQuery: '',
 
