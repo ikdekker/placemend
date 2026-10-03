@@ -194,11 +194,15 @@ export async function pushLocalToRemote(apiKey?: string): Promise<SyncResult> {
 /**
  * Pull remote server records and merge into local Dexie database
  */
-export async function pullRemoteToLocal(apiKey?: string, force = false): Promise<SyncResult> {
+// Version of the workspace this device last merged (lets a refresh skip unchanged data)
+let lastMergedVersion: { key: string; updatedAt: string } | null = null;
+
+export async function pullRemoteToLocal(apiKey?: string, force = false, onlyIfChanged = false): Promise<SyncResult> {
   const key = apiKey || getWorkspaceApiKey();
 
   try {
-    const res = await fetch(`${API_BASE_URL}/sync.php`, {
+    const since = onlyIfChanged && lastMergedVersion?.key === key ? `?since=${encodeURIComponent(lastMergedVersion.updatedAt)}` : '';
+    const res = await fetch(`${API_BASE_URL}/sync.php${since}`, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
@@ -212,6 +216,7 @@ export async function pullRemoteToLocal(apiKey?: string, force = false): Promise
     }
 
     const json = await res.json();
+    if (json.unchanged) return { success: true, message: 'Already up to date.' };
     const remoteData = json.data;
 
     if (!remoteData) {
@@ -277,6 +282,7 @@ export async function pullRemoteToLocal(apiKey?: string, force = false): Promise
       await mergeTable('containers', db.containers, remoteData.containers as Container[]);
       await mergeTable('items', db.items, remoteData.items as Item[]);
     });
+    if (json.updatedAt) lastMergedVersion = { key, updatedAt: String(json.updatedAt) };
 
     return {
       success: true,
@@ -430,4 +436,29 @@ export async function wipeDeviceAfterSignOut(): Promise<void> {
     localStorage.removeItem(k);
   }
   generateNewApiKey(); // a fresh, account-less local workspace
+}
+
+let refreshing: Promise<void> | null = null;
+/**
+ * While the app is open: bring in changes made elsewhere (other devices, ChatGPT/Claude, contacts).
+ * Sends this device's pending edits first, and downloads only when the workspace changed.
+ */
+export function refreshWorkspace(): Promise<void> {
+  if (!refreshing) {
+    refreshing = (async () => {
+      try {
+        const key = getWorkspaceApiKey();
+        if (!key.startsWith('pm_usr_')) return;
+        if (Object.keys(loadPendingDeletes()).some((t) => Object.keys(loadPendingDeletes()[t as TableName] || {}).length)) {
+          await pushLocalToRemote(key); // deletions made here must reach the server before we merge
+        }
+        await pullRemoteToLocal(key, false, true);
+      } catch (e) {
+        console.warn('Workspace refresh failed', e);
+      } finally {
+        refreshing = null;
+      }
+    })();
+  }
+  return refreshing;
 }

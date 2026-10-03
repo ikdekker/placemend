@@ -10,6 +10,11 @@ function handleSync(): void {
 
     if ($method === 'GET') {
         $workspace = loadWorkspace($apiKey);
+        // The app polls while open: if it already has this version, skip sending the whole workspace
+        $since = (string)($_GET['since'] ?? '');
+        if ($since !== '' && (int)round((float)$since) === (int)round((float)($workspace['updatedAt'] ?? 0))) {
+            sendJsonResponse(['success' => true, 'unchanged' => true, 'updatedAt' => $workspace['updatedAt']]);
+        }
         unset($workspace['history']); // fetched separately via history.php
         sendJsonResponse([
             'success' => true,

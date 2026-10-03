@@ -24,7 +24,7 @@ import { seedDemoDataIfEmpty } from './db/sampleData';
 import { db } from './db/database';
 import { useAppStore } from './store/useAppStore';
 import { fetchCurrentUser, loginWithSigninCode } from './services/auth';
-import { pullRemoteToLocal, getWorkspaceApiKey, setAutoSyncEnabled } from './services/apiSync';
+import { pullRemoteToLocal, getWorkspaceApiKey, setAutoSyncEnabled, refreshWorkspace } from './services/apiSync';
 
 export function App() {
   const { appMode, selectedFurnitureId, selectedContainerId, setCurrentUser } = useAppStore();
@@ -142,16 +142,21 @@ export function App() {
     };
   }, [setCurrentUser]);
 
-  // Keep shared rooms fresh while the app is open
+  // Keep the workspace and shared rooms fresh while the app is open: every minute while
+  // visible, and right away when switching back to the app
   useEffect(() => {
-    const t = setInterval(() => {
-      if (document.visibilityState === 'visible') void syncShared();
-    }, 120000);
-    const onVisible = () => document.visibilityState === 'visible' && void syncShared();
-    document.addEventListener('visibilitychange', onVisible);
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      void refreshWorkspace();
+      void syncShared();
+    };
+    const t = setInterval(refresh, 60000);
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
     return () => {
       clearInterval(t);
-      document.removeEventListener('visibilitychange', onVisible);
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
     };
   }, []);
 
