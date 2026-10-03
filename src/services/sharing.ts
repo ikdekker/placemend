@@ -27,6 +27,11 @@ const PENDING_KEY = 'placemend_shared_pending_deletes';
 let meta: Record<string, ShareMeta> = load(META_KEY);
 const owner = new Map<string, string>(); // id of a shared room/furniture/container -> shareId
 let applying = false; // set while writing server data, so the hooks stay out of the way
+let suspended = false; // set while signing out: no shared sync at all
+
+export function setSharingSuspended(on: boolean): void {
+  suspended = on;
+}
 
 function load<T>(key: string): Record<string, T> {
   try {
@@ -119,7 +124,7 @@ for (const t of TABLES) {
   });
 
   db.table(t).hook('deleting', (primKey, obj) => {
-    if (applying || !obj?.shareId) return;
+    if (applying || suspended || !obj?.shareId) return;
     // Local copies of view-only rooms may be cleared (sign out, restore a backup); nothing is sent
     // to the owner and the next shared sync brings the room back.
     if (viewOnly(obj.shareId)) return;
@@ -144,7 +149,7 @@ const signedIn = () => getWorkspaceApiKey().startsWith('pm_usr_');
 
 /** Send this device's edits in shared rooms (edit permission only) to their owners */
 export async function pushShared(): Promise<void> {
-  if (!signedIn()) return;
+  if (!signedIn() || suspended) return;
   const pending = load<Partial<Record<Table, Record<string, number>>>>(PENDING_KEY);
   const shareIds = new Set([...Object.keys(meta), ...Object.keys(pending)]);
   for (const sid of shareIds) {
@@ -166,7 +171,7 @@ export async function pushShared(): Promise<void> {
 
 /** Refresh every room shared with this user from its owner */
 export async function pullShared(): Promise<void> {
-  if (!signedIn()) return;
+  if (!signedIn() || suspended) return;
   const json = await call('GET', '?action=incoming');
   const shared: { share: { id: string; roomId: string; role: ShareRole; ownerName: string; ownerEmail: string }; data: Record<Table, { id: string }[]> }[] = json.shared ?? [];
   const nextMeta: Record<string, ShareMeta> = {};

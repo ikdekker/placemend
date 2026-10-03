@@ -16,6 +16,7 @@ import {
 } from '../services/auth';
 import { 
   API_BASE_URL,
+  wipeDeviceAfterSignOut,
   syncBidirectional, 
   pullRemoteToLocal,
   isAutoSyncEnabled, 
@@ -36,6 +37,10 @@ import { History,
   AlertCircle, 
   ExternalLink 
 } from 'lucide-react';
+
+// Switch on once the redirect URI is registered in Google Cloud Console (OAuth client →
+// Authorized redirect URIs: https://freshcoders.nl/placemend/api/auth/google.php)
+const REDIRECT_SIGN_IN = false;
 
 export const AccountModal: React.FC = () => {
   const { 
@@ -118,8 +123,7 @@ export const AccountModal: React.FC = () => {
             client_id: clientId,
             // Redirect instead of a pop-up: the pop-up needs third-party cookies, which Firefox,
             // Safari and in-app browsers block (Google then shows a bare "400" page)
-            ux_mode: 'redirect',
-            login_uri: `${API_BASE_URL}/auth/google.php`,
+            ...(REDIRECT_SIGN_IN ? { ux_mode: 'redirect' as const, login_uri: `${API_BASE_URL}/auth/google.php` } : {}),
             callback: async (response) => {
               if (response.credential) {
                 setIsLoading(true);
@@ -192,13 +196,11 @@ export const AccountModal: React.FC = () => {
     setIsLoading(true);
     try {
       await logout();
+      // Nothing of the account may stay visible (or keep syncing) on this device
+      await wipeDeviceAfterSignOut();
       setCurrentUser(null);
       setSyncStatus(null);
-      await seedDemoDataIfEmpty();
-      const all = await db.rooms.toArray();
-      if (all.length > 0) {
-        setSelectedRoomId(all[0].id);
-      }
+      window.location.replace(window.location.pathname); // start clean, as a signed-out visitor
     } finally {
       setIsLoading(false);
     }

@@ -1,6 +1,6 @@
 import { db } from '../db/database';
 import { Furniture, Container, Item, Room, Location } from '../types';
-import { pushShared } from './sharing';
+import { pushShared, setSharingSuspended } from './sharing';
 
 const STORAGE_KEY = 'placemend_api_key';
 const AUTO_SYNC_KEY = 'placemend_auto_sync_enabled';
@@ -78,6 +78,8 @@ function savePendingDeletes(t: Tombstones): void {
 
 // Set while applying the server's own tombstones, so those deletes are not re-recorded
 let applyingRemoteDeletes = false;
+// Set while wiping this device on sign-out: those deletes must never reach the cloud
+let deviceWipe = false;
 
 /** Remember that a record left this workspace (deleted, or moved into a room someone shared) */
 export function recordPendingDelete(name: TableName, id: string): void {
@@ -88,7 +90,7 @@ export function recordPendingDelete(name: TableName, id: string): void {
 
 for (const name of SYNCED_TABLES) {
   db.table(name).hook('deleting', (primKey, obj) => {
-    if (applyingRemoteDeletes) return;
+    if (applyingRemoteDeletes || deviceWipe) return;
     if (!obj?.shareId) recordPendingDelete(name, String(primKey)); // shared records: see sharing.ts
     scheduleAutoSync();
   });
@@ -397,4 +399,35 @@ export async function undoHistoryEntry(id: string): Promise<string> {
   if (!res.ok || !json.success) throw new Error(json.error || `HTTP error ${res.status}`);
   await pullRemoteToLocal();
   return json.message || 'Undone.';
+}
+
+/**
+ * Sign-out: send what's not synced yet, then remove every trace of the account from this device
+ * (local copy, workspace key, shared rooms, pending sync work). The wipe is never synced.
+ */
+export async function wipeDeviceAfterSignOut(): Promise<void> {
+  const key = getWorkspaceApiKey();
+  if (key.startsWith('pm_usr_')) {
+    try {
+      await pushLocalToRemote(key);
+      await pushShared();
+    } catch {
+      /* offline: unsynced edits can't be saved, but the account data on the server is safe */
+    }
+  }
+  setAutoSyncEnabled(false);
+  if (autoSyncTimeout) clearTimeout(autoSyncTimeout);
+  deviceWipe = true;
+  setSharingSuspended(true);
+  try {
+    await db.transaction('rw', [db.locations, db.rooms, db.furniture, db.containers, db.items], async () => {
+      for (const t of SYNCED_TABLES) await db.table(t).clear();
+    });
+  } finally {
+    deviceWipe = false;
+  }
+  for (const k of [PENDING_DELETES_KEY, 'placemend_shared_meta', 'placemend_shared_pending_deletes', 'placemend_selected_room']) {
+    localStorage.removeItem(k);
+  }
+  generateNewApiKey(); // a fresh, account-less local workspace
 }
