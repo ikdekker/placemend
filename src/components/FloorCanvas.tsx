@@ -20,6 +20,7 @@ import { scheduleAutoSync } from '../services/apiSync';
 import { seedDemoDataIfEmpty, scheduleSeedIfEmpty } from '../db/sampleData';
 import { roundCm, snapTo, formatMeters } from '../utils/measure';
 import { CanvasOptionsMenu } from './CanvasOptionsMenu';
+import { getAppMode } from '../services/appMode';
 import { FurniturePanel } from './FurniturePanel';
 
 export const FloorCanvas: React.FC = () => {
@@ -184,6 +185,11 @@ export const FloorCanvas: React.FC = () => {
     if (!activeId) return [];
     return await db.furniture.where('roomId').equals(activeId).toArray();
   }, [room?.id, selectedRoomId]) || [];
+  // undefined while loading, so the "empty room" hint doesn't flash in furnished rooms
+  const furnitureCount = useLiveQuery(
+    () => (room?.id || selectedRoomId ? db.furniture.where('roomId').equals((room?.id || selectedRoomId)!).count() : 0),
+    [room?.id, selectedRoomId]
+  );
 
   // Items grouped by furniture for unique item counts
   const itemCountsByFurniture = useLiveQuery(async () => {
@@ -857,20 +863,24 @@ export const FloorCanvas: React.FC = () => {
         <div className="w-16 h-16 rounded-3xl bg-blue-50 border border-blue-200 flex items-center justify-center mb-4 text-blue-600 shadow-sm animate-pulse">
           <MapPin className="w-8 h-8" />
         </div>
-        <h3 className="text-base sm:text-lg font-black text-slate-800 mb-1">Loading Apartment Rooms...</h3>
+        <h3 className="text-base sm:text-lg font-black text-slate-800 mb-1">No rooms yet</h3>
         <p className="text-xs text-slate-500 max-w-xs mb-4">
-          Synchronizing your connected floor plan and furniture layout.
+          Add the room where you most often look for things.
         </p>
         <button
           onClick={async () => {
-            await seedDemoDataIfEmpty();
-            const r = await db.rooms.toArray();
-            if (r.length > 0) setSelectedRoomId(r[0].id);
+            if (getAppMode() === 'demo') {
+              await seedDemoDataIfEmpty();
+              const r = await db.rooms.toArray();
+              if (r.length > 0) setSelectedRoomId(r[0].id);
+            } else {
+              setRoomManagerOpen(true);
+            }
           }}
           className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-2xl shadow-md transition-all active:scale-95 flex items-center gap-2 cursor-pointer"
         >
           <RotateCcw className="w-4 h-4" />
-          <span>Restore Apartment Layout</span>
+          <span>{getAppMode() === 'demo' ? 'Restore demo home' : 'Add a room'}</span>
         </button>
       </div>
     );
@@ -902,6 +912,23 @@ export const FloorCanvas: React.FC = () => {
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* An empty room says what to do next */}
+      {furnitureCount === 0 && !selectedFurnitureId && (
+        <div className="absolute left-3 right-3 bottom-24 sm:bottom-8 z-20 mx-auto max-w-sm bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200 shadow-lg p-3 flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-black text-slate-900">This room is empty</p>
+            <p className="text-xs text-slate-500">Add a cupboard, shelf or wardrobe, then fill it.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setFurnitureLibraryOpen(true)}
+            className="min-h-[44px] px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold flex items-center gap-1.5 cursor-pointer flex-shrink-0"
+          >
+            <Plus className="w-4 h-4 stroke-[2.5]" /> Add furniture
+          </button>
         </div>
       )}
 

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Header } from './components/Header';
 import { FloorCanvas } from './components/FloorCanvas';
 import { PhysicalFurnitureView } from './components/PhysicalFurnitureView';
@@ -13,6 +13,8 @@ import { AddWithPhotoModal } from './components/AddWithPhotoModal';
 import { SetupGuide } from './components/SetupGuide';
 import { AccountModal } from './components/AccountModal';
 import { HistoryModal } from './components/HistoryModal';
+import { Onboarding, DemoBanner } from './components/Onboarding';
+import { getAppMode, setAppMode as setDeviceMode, getOnboardingStep, setOnboardingStep } from './services/appMode';
 import { ShareRoomModal } from './components/ShareRoomModal';
 import { initSharedIndex, syncShared } from './services/sharing';
 import { ConnectRoomModal } from './components/ConnectRoomModal';
@@ -24,12 +26,15 @@ import { seedDemoDataIfEmpty } from './db/sampleData';
 import { db } from './db/database';
 import { useAppStore } from './store/useAppStore';
 import { fetchCurrentUser, loginWithSigninCode } from './services/auth';
-import { pullRemoteToLocal, getWorkspaceApiKey, setAutoSyncEnabled, refreshWorkspace } from './services/apiSync';
+import { pullRemoteToLocal, getWorkspaceApiKey, setAutoSyncEnabled, refreshWorkspace, dropDemoBeforeSignIn } from './services/apiSync';
 
 export function App() {
   const { appMode, selectedFurnitureId, selectedContainerId, setCurrentUser } = useAppStore();
 
   // Escape closes the top-most open dialog (inputs keep Escape for their own cancel behaviour)
+  // Startup (sign-in, sync, shared rooms) finished: only then decide whether to show onboarding
+  const [initDone, setInitDone] = useState(false);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
@@ -70,6 +75,7 @@ export function App() {
         if (signinCode) {
           try {
             await loginWithSigninCode(signinCode);
+            await dropDemoBeforeSignIn(); // demo rooms on this device must never go into the account
           } catch (err) {
             window.alert((err as Error).message || 'Google sign-in failed. Please try again.');
           }
@@ -128,11 +134,15 @@ export function App() {
         window.history.replaceState(null, '', window.location.pathname);
       }
 
-      // 3. Guarantee baseline apartment rooms exist even after cloud sync or logout
-      const finalCount = await db.rooms.count();
-      if (finalCount === 0) {
-        await seedDemoDataIfEmpty();
+      // Who is this? Existing users and earlier demo visitors skip the welcome screen
+      const roomCount = await db.rooms.count();
+      if (!getAppMode()) {
+        if (getWorkspaceApiKey().startsWith('pm_usr_')) setDeviceMode('own');
+        else if (roomCount > 0) setDeviceMode('demo');
       }
+      if (roomCount > 0 && getAppMode() === 'own' && getOnboardingStep() !== 'furniture') setOnboardingStep('done');
+      if (getAppMode() === 'demo' && roomCount === 0) await seedDemoDataIfEmpty();
+      if (isMounted) setInitDone(true);
     };
 
     initializeWorkspace();
@@ -164,6 +174,8 @@ export function App() {
     <div className="flex flex-col w-screen h-screen bg-slate-100 text-slate-800 overflow-hidden font-sans pb-16 md:pb-0 relative">
       {/* Top Navbar: Space, Quick Search, Tools */}
       <Header />
+
+      <DemoBanner />
 
       {/* Main Workspace Area: True Visual Zoom Navigation */}
       <main className="flex-1 min-h-0 w-full relative flex flex-col overflow-hidden">
@@ -197,6 +209,7 @@ export function App() {
       <MultiRoomOverviewModal />
       <HistoryModal />
       <ShareRoomModal />
+      <Onboarding ready={initDone} />
     </div>
   );
 }

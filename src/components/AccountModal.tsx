@@ -17,6 +17,7 @@ import {
 import { 
   API_BASE_URL,
   wipeDeviceAfterSignOut,
+  dropDemoBeforeSignIn,
   syncBidirectional, 
   pullRemoteToLocal,
   isAutoSyncEnabled, 
@@ -130,6 +131,7 @@ export const AccountModal: React.FC = () => {
                 setError(null);
                 try {
                   const user = await loginWithGoogleToken(response.credential);
+                  await dropDemoBeforeSignIn(); // demo rooms on this device must never go into the account
                   setCurrentUser(user);
                   setAutoSync(true);
                   setAutoSyncEnabled(true);

@@ -1,3 +1,4 @@
+import { getAppMode } from '../services/appMode';
 import { db } from "./database";
 import { Location, Room, Furniture, Container, Item } from "../types";
 
@@ -872,6 +873,10 @@ export const SEED_ITEMS: Item[] = [
 ];
 
 export async function seedDemoDataIfEmpty() {
+  // The demo apartment only exists when someone chose "Look around the demo"; a new user starts
+  // with their own empty home (onboarding), and the demo must never end up in an account
+  if (getAppMode() !== 'demo') return;
+
   // 1. Ensure primary apartment location exists
   await db.locations.put(SEED_LOCATION).catch(() => {});
 

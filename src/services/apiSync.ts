@@ -1,6 +1,7 @@
 import { db } from '../db/database';
 import { Furniture, Container, Item, Room, Location } from '../types';
 import { pushShared, setSharingSuspended } from './sharing';
+import { getAppMode, setAppMode, setOnboardingStep } from './appMode';
 
 const STORAGE_KEY = 'placemend_api_key';
 const AUTO_SYNC_KEY = 'placemend_auto_sync_enabled';
@@ -423,6 +424,18 @@ export async function wipeDeviceAfterSignOut(): Promise<void> {
   }
   setAutoSyncEnabled(false);
   if (autoSyncTimeout) clearTimeout(autoSyncTimeout);
+  await clearLocalData();
+  for (const k of ['placemend_shared_meta', 'placemend_shared_pending_deletes']) localStorage.removeItem(k);
+  generateNewApiKey(); // a fresh, account-less local workspace
+  setAppMode(null); // a signed-out visitor gets the welcome screen again
+  setOnboardingStep(null);
+}
+
+/**
+ * Empty this device's local copy without that counting as deletions to sync (sign-out, leaving
+ * the demo, demo data present when signing in).
+ */
+export async function clearLocalData(): Promise<void> {
   deviceWipe = true;
   setSharingSuspended(true);
   try {
@@ -431,11 +444,15 @@ export async function wipeDeviceAfterSignOut(): Promise<void> {
     });
   } finally {
     deviceWipe = false;
+    setSharingSuspended(false);
   }
-  for (const k of [PENDING_DELETES_KEY, 'placemend_shared_meta', 'placemend_shared_pending_deletes', 'placemend_selected_room']) {
-    localStorage.removeItem(k);
-  }
-  generateNewApiKey(); // a fresh, account-less local workspace
+  for (const k of [PENDING_DELETES_KEY, 'placemend_selected_room']) localStorage.removeItem(k);
+}
+
+/** Before an account's data is loaded: demo data on this device must never be synced into it */
+export async function dropDemoBeforeSignIn(): Promise<void> {
+  if (getAppMode() === 'demo') await clearLocalData();
+  setAppMode('own');
 }
 
 let refreshing: Promise<void> | null = null;
