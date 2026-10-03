@@ -40,7 +40,7 @@ import { History,
 
 // Switch on once the redirect URI is registered in Google Cloud Console (OAuth client →
 // Authorized redirect URIs: https://freshcoders.nl/placemend/api/auth/google.php)
-const REDIRECT_SIGN_IN = false;
+const REDIRECT_SIGN_IN = true;
 
 export const AccountModal: React.FC = () => {
   const { 
