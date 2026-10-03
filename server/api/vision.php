@@ -58,18 +58,31 @@ $scopeLine = $scopeLabel !== ''
     ? "This photo shows ONLY this part of the furniture: \"{$scopeLabel}\". Ignore anything visible outside it (neighbouring shelves, other doors)."
     : '';
 
+// Items already recorded in this furniture: the AI reuses these exact names, so the app can match them
+$known = [];
+foreach (array_slice(is_array($body['known'] ?? null) ? $body['known'] : [], 0, 120) as $k) {
+    $k = trim(preg_replace('/[\r\n"]+/', ' ', (string)$k));
+    if ($k !== '') $known[] = '- ' . substr($k, 0, 80);
+}
+$knownList = $known
+    ? "Items already recorded in this furniture (name, then where):\n" . implode("\n", $known) .
+      "\nIf you see one of these, use EXACTLY the same name so it can be matched. Still report what you see; do not leave it out."
+    : '';
+
 $prompt = <<<PROMPT
 You are cataloguing a home inventory from a photo of storage furniture.
 Furniture: "{$furnitureName}" in room "{$roomName}".
 {$scopeLine}
 Storage slots you may use (id: label):
 {$slotList}
+{$knownList}
 
 For every distinct product you can see, identify the product rather than describing it:
 - name: short product name in the SINGULAR ("Frying pan", never "Frying pans"), in English.
 - brand and model when readable or recognisable (e.g. "Optimum Nutrition Gold Standard Whey"); empty string if unknown.
 - size: capacity/weight/dimensions if readable or estimable (e.g. "2.27 kg", "1 L", "28 cm"); append "?" when estimated; empty string if unknown.
-- quantity: how many identical units are visible (count them). Different sizes or variants are separate entries.
+- quantity: how many identical units are visible (count them). List each product ONCE with the total count;
+  different sizes or variants are separate entries.
 - slotId: the id of the slot the item is in, chosen from the list above; use the closest match.
 - category: one of Kitchen, Food, Supplements, Electronics, Cables, Documents, Tools, Cleaning, Linens, Clothing, Sports, Toiletries, Medicine, Memorabilia, Office, Toys, Other.
 - confidence: 0 to 1, how sure you are about the identification.

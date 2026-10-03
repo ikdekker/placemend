@@ -7,6 +7,7 @@ import { Container, Item } from '../types';
 import { API_BASE_URL, getWorkspaceApiKey, scheduleAutoSync } from '../services/apiSync';
 import { reportClientError } from '../services/errorReport';
 import { PhotoError } from './PhotoError';
+import { isSameItem, nameSimilarity } from '../utils/itemMatch';
 import { X, Camera, Sparkles, Loader2, Check } from 'lucide-react';
 
 interface ScannedItem {
@@ -18,6 +19,10 @@ interface ScannedItem {
   category: string;
   confidence: number;
   include: boolean;
+  /** An item already stored in this furniture that looks like the same product */
+  match?: { id: string; name: string; quantity: number; slotId: string };
+  /** For matched items: change the stored one instead of adding a new item */
+  mode?: 'new' | 'update';
 }
 
 // Downscale before upload: keeps the request small and the AI call fast and cheap.
@@ -73,7 +78,8 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: s
     const furniture = await db.furniture.get(furnitureId);
     const room = furniture ? await db.rooms.get(furniture.roomId) : undefined;
     const containers = await db.containers.where('furnitureId').equals(furnitureId).toArray();
-    return { furniture, room, containers };
+    const items = await db.items.where('containerId').anyOf(containers.map((c) => c.id)).toArray();
+    return { furniture, room, containers, items };
   }, [furnitureId]);
 
   const allSlots = useMemo(() => slotLabels(data?.containers || []), [data?.containers]);
@@ -95,6 +101,45 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: s
   }, [rootContainerId, data?.containers]);
   const slots = useMemo(() => (scopeIds ? allSlots.filter((sl) => scopeIds.has(sl.id)) : allSlots), [allSlots, scopeIds]);
   const scopeLabel = rootContainerId ? allSlots.find((sl) => sl.id === rootContainerId)?.label : undefined;
+  const slotLabelOf = (id: string) => allSlots.find((sl) => sl.id === id)?.label || '';
+  // What's already stored here (in the scanned part when scoped)
+  const existing = useMemo(
+    () => (data?.items || []).filter((it) => !scopeIds || scopeIds.has(it.containerId)),
+    [data?.items, scopeIds]
+  );
+
+  /** Merge repeats and mark products that are already stored */
+  const dedupe = (prev: ScannedItem[], found: ScannedItem[]): ScannedItem[] => {
+    // Within one photo the same product listed twice is added up
+    const merged: ScannedItem[] = [];
+    for (const it of found) {
+      const same = merged.find((m) => m.slotId === it.slotId && isSameItem(m.name, it.name));
+      if (same) same.quantity += Math.max(1, it.quantity || 1);
+      else merged.push({ ...it });
+    }
+    // Across photos (e.g. the same shelf photographed twice) a product counts once, at the highest count
+    const out = prev.map((p) => ({ ...p }));
+    for (const it of merged) {
+      const seen = out.find((p) => isSameItem(p.name, it.name) && (p.slotId === it.slotId || !it.slotId));
+      if (seen) seen.quantity = Math.max(seen.quantity, it.quantity);
+      else out.push(it);
+    }
+    // Already stored in this furniture? Best match wins, same compartment preferred
+    for (const r of out) {
+      if (r.match) continue;
+      let best: { it: Item; score: number } | null = null;
+      for (const it of existing) {
+        const score = nameSimilarity(r.name, it.name) + (it.containerId === r.slotId ? 0.05 : 0);
+        if (score >= 0.8 && (!best || score > best.score)) best = { it, score };
+      }
+      if (best) {
+        r.match = { id: best.it.id, name: best.it.name, quantity: best.it.quantity, slotId: best.it.containerId };
+        r.include = false; // skip by default: it's already there
+        r.mode = 'update';
+      }
+    }
+    return out;
+  };
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -122,6 +167,7 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: s
           roomName: data.room?.name || '',
           scopeLabel,
           slots,
+          known: existing.slice(0, 120).map((it) => `${it.name} (${slotLabelOf(it.containerId)})`),
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -129,7 +175,7 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: s
       setScansLeft(typeof json.scansLeftToday === 'number' ? json.scansLeftToday : null);
       // Each photo adds to the list, so a door can be scanned shelf by shelf
       const found = (json.items as Omit<ScannedItem, 'include'>[]).map((it) => ({ ...it, include: true }));
-      setResults((prev) => [...(prev || []), ...found]);
+      setResults((prev) => dedupe(prev || [], found));
       setLastImage(null);
     } catch (err) {
       reportClientError('scan-photo-failed', err, { furnitureId });
@@ -149,7 +195,11 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: s
     setSaving(true);
     try {
       const now = Date.now();
-      const items: Item[] = chosen.map((r, i) => ({
+      const updates = chosen.filter((r) => r.match && r.mode === 'update');
+      for (const r of updates) {
+        await db.items.update(r.match!.id, { quantity: Math.max(1, r.quantity || 1), containerId: r.slotId, updatedAt: now });
+      }
+      const items: Item[] = chosen.filter((r) => !(r.match && r.mode === 'update')).map((r, i) => ({
         id: `item-scan-${now}-${i}`,
         containerId: r.slotId,
         name: r.name.trim(),
@@ -160,9 +210,9 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: s
         createdAt: now,
         updatedAt: now,
       }));
-      await db.items.bulkAdd(items);
+      if (items.length) await db.items.bulkAdd(items);
       scheduleAutoSync();
-      onAdded?.(items.length);
+      onAdded?.(items.length + updates.length);
       onClose();
     } catch (err) {
       reportClientError('scan-save-failed', err, { furnitureId });
@@ -287,6 +337,37 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: s
                       ))}
                     </select>
                   </div>
+                  {r.match && (
+                    <div className="mt-2 ml-7 p-2 rounded-xl bg-emerald-50 border border-emerald-200 space-y-1.5">
+                      <p className="text-[11px] font-bold text-emerald-800">
+                        Already stored: {r.match.name} ×{r.match.quantity}
+                        <span className="font-medium text-emerald-700"> · {slotLabelOf(r.match.slotId)}</span>
+                      </p>
+                      <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label={`What to do with ${r.name}`}>
+                        {([
+                          ['skip', 'Skip'],
+                          ['update', `Set to ×${r.quantity}`],
+                          ['new', 'Add as new'],
+                        ] as const).map(([key, label]) => {
+                          const active = key === 'skip' ? !r.include : r.include && r.mode === key;
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              role="radio"
+                              aria-checked={active}
+                              onClick={() => update(idx, key === 'skip' ? { include: false } : { include: true, mode: key })}
+                              className={`min-h-[36px] rounded-lg text-[11px] font-bold cursor-pointer ${
+                                active ? 'bg-emerald-600 text-white' : 'bg-white text-emerald-800 border border-emerald-200'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                   {r.confidence < 0.5 && <p className="mt-1 pl-7 text-[11px] font-bold text-amber-600">Unsure: please check</p>}
                 </div>
               ))}
@@ -310,7 +391,7 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: s
               className="ml-auto px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-bold cursor-pointer flex items-center gap-1.5"
             >
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-              Add {includedCount} item{includedCount === 1 ? '' : 's'}
+              Save {includedCount} item{includedCount === 1 ? '' : 's'}
             </button>
           </div>
         )}
