@@ -6,6 +6,25 @@
 
 require_once __DIR__ . '/common.php';
 
+// The server's PHP has no mbstring extension: UTF-8 safe fallbacks
+if (!function_exists('mb_strlen')) {
+    function mb_strlen(string $s): int { return preg_match_all('/./us', $s); }
+}
+if (!function_exists('mb_substr')) {
+    function mb_substr(string $s, int $start, ?int $len = null): string {
+        preg_match_all('/./us', $s, $m);
+        return implode('', array_slice($m[0], $start, $len));
+    }
+}
+if (!function_exists('mb_strtolower')) {
+    function mb_strtolower(string $s): string {
+        return strtolower(strtr($s, ['À'=>'à','Á'=>'á','Â'=>'â','Ä'=>'ä','È'=>'è','É'=>'é','Ê'=>'ê','Ë'=>'ë','Ï'=>'ï','Ö'=>'ö','Ó'=>'ó','Ü'=>'ü','Ú'=>'ú','Ç'=>'ç','Ñ'=>'ñ']));
+    }
+}
+if (!function_exists('mb_strpos')) {
+    function mb_strpos(string $haystack, string $needle) { return strpos($haystack, $needle); }
+}
+
 const MCP_PROTOCOL = '2025-06-18';
 const MCP_TABLES = ['locations', 'rooms', 'furniture', 'containers', 'items'];
 
