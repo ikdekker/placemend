@@ -5,6 +5,7 @@
 // Auth: the user's own workspace key (pm_usr_...), as "Authorization: Bearer <key>" or ?key=<key>.
 
 require_once __DIR__ . '/common.php';
+require_once __DIR__ . '/history_lib.php';
 
 // The server's PHP has no mbstring extension: UTF-8 safe fallbacks
 if (!function_exists('mb_strlen')) {
@@ -146,6 +147,25 @@ function mcpTools(): array {
                 'container_id' => ['type' => 'string'],
             ], 'required' => ['container_id']],
             'annotations' => $ro,
+        ],
+        [
+            'name' => 'recent_changes',
+            'title' => 'Recent changes',
+            'description' => 'Show the change history (newest first): what was added, moved, edited or removed, when, and by whom (app on phone/computer, ChatGPT, Claude). Optionally for one item. Entries have a change_id for undo_change.',
+            'inputSchema' => ['type' => 'object', 'properties' => [
+                'item_id' => ['type' => 'string', 'description' => 'Only changes to this item'],
+                'limit' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 100, 'default' => 20],
+            ]],
+            'annotations' => $ro,
+        ],
+        [
+            'name' => 'undo_change',
+            'title' => 'Undo a change',
+            'description' => 'Undo one change from recent_changes (restores the earlier state). Only do this when the user asks for it.',
+            'inputSchema' => ['type' => 'object', 'properties' => [
+                'change_id' => ['type' => 'string'],
+            ], 'required' => ['change_id']],
+            'annotations' => ['readOnlyHint' => false, 'destructiveHint' => true],
         ],
         [
             'name' => 'add_item',
@@ -293,6 +313,18 @@ function mcpCall(string $apiKey, string $name, array $args): string {
     $now = (int)round(microtime(true) * 1000);
 
     switch ($name) {
+        case 'recent_changes': {
+            $limit = max(1, min(100, (int)($args['limit'] ?? 20)));
+            $list = historyList($ws, mcpStr($args, 'item_id'), $limit);
+            if (!$list) return 'No changes recorded yet.';
+            return implode("
+", array_map(fn($e) => sprintf('- %s · %s · %s%s (change_id: %s)',
+                date('j M H:i', (int)($e['at'] / 1000)), $e['source'], $e['summary'], $e['undone'] ? ' [undone]' : '', $e['id']), $list));
+        }
+
+        case 'undo_change':
+            return historyUndo($apiKey, (string)mcpStr($args, 'change_id', true), historySource('mcp') . ' (undo)');
+
         case 'search_items': {
             $q = mcpStr($args, 'query', true);
             $limit = max(1, min(100, (int)($args['limit'] ?? 25)));
@@ -472,5 +504,6 @@ function mcpSave(string $apiKey, array $ws): void {
         sort($old);
         foreach (array_slice($old, 0, max(0, count($old) - 20)) as $f) @unlink($f);
     }
+    historyRecordDiff(loadWorkspace($apiKey), $ws, historySource('mcp'));
     if (!saveWorkspace($apiKey, $ws)) throw new InvalidArgumentException('Could not save the change on the server. Please try again.');
 }

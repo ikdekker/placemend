@@ -2,6 +2,7 @@
 // Placemend API - State Synchronization Handler (GET / POST)
 
 require_once __DIR__ . '/../common.php';
+require_once __DIR__ . '/../history_lib.php';
 
 function handleSync(): void {
     $apiKey = getWorkspaceApiKey();
@@ -9,6 +10,7 @@ function handleSync(): void {
 
     if ($method === 'GET') {
         $workspace = loadWorkspace($apiKey);
+        unset($workspace['history']); // fetched separately via history.php
         sendJsonResponse([
             'success' => true,
             'workspaceKey' => $apiKey,
@@ -27,6 +29,7 @@ function handleSync(): void {
     if ($method === 'POST') {
         $body = getJsonBody();
         $workspace = loadWorkspace($apiKey);
+        $original = $workspace;
 
         $tables = ['locations', 'rooms', 'furniture', 'containers', 'items'];
         $stats = ['updated' => 0, 'inserted' => 0, 'deleted' => 0];
@@ -95,7 +98,9 @@ function handleSync(): void {
         }
 
         $workspace['deleted'] = $tombstones;
+        historyRecordDiff($original, $workspace, historySource('app'));
         saveWorkspace($apiKey, $workspace);
+        unset($workspace['history']);
 
         sendJsonResponse([
             'success' => true,

@@ -352,3 +352,40 @@ export async function fetchApiDocumentation(): Promise<{ visionPrompt: string; e
     return null;
   }
 }
+
+export type HistoryEntry = {
+  id: string;
+  at: number;
+  source: string;
+  table: 'rooms' | 'furniture' | 'containers' | 'items';
+  recordId: string;
+  action: 'create' | 'update' | 'delete';
+  summary: string;
+  undone: number | null;
+};
+
+/** Recent changes from the server, newest first (optionally for one record) */
+export async function fetchHistory(recordId?: string | null, limit = 150): Promise<HistoryEntry[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (recordId) params.set('recordId', recordId);
+  const res = await fetch(`${API_BASE_URL}/history.php?${params}`, {
+    headers: { Accept: 'application/json', 'X-API-Key': getWorkspaceApiKey() },
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.success) throw new Error(json.error || `HTTP error ${res.status}`);
+  return json.entries as HistoryEntry[];
+}
+
+/** Undo a change on the server, then bring this device up to date */
+export async function undoHistoryEntry(id: string): Promise<string> {
+  await pushLocalToRemote(); // make sure the server has this device's latest edits first
+  const res = await fetch(`${API_BASE_URL}/history.php`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': getWorkspaceApiKey() },
+    body: JSON.stringify({ undo: id }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.success) throw new Error(json.error || `HTTP error ${res.status}`);
+  await pullRemoteToLocal();
+  return json.message || 'Undone.';
+}

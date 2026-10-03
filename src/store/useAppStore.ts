@@ -54,6 +54,9 @@ export interface AppState {
   setConnectRoomModalOpen: (open: boolean, context?: { roomId: string; doorId: string } | null) => void;
   isMultiRoomOverviewOpen: boolean;
   setMultiRoomOverviewOpen: (open: boolean) => void;
+  // Change history sheet: all changes (recordId null) or those of one record
+  historyView: { recordId: string | null; title?: string } | null;
+  setHistoryView: (view: { recordId: string | null; title?: string } | null) => void;
 
   // Search
   searchQuery: string;
@@ -146,6 +149,8 @@ export const useAppStore = create<AppState>((set) => ({
     }),
   isMultiRoomOverviewOpen: false,
   setMultiRoomOverviewOpen: (open) => set({ isMultiRoomOverviewOpen: open }),
+  historyView: null,
+  setHistoryView: (view) => set({ historyView: view }),
   searchQuery: '',
 
   setSelectedLocationId: (id) => set({ selectedLocationId: id }),

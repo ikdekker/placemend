@@ -12,6 +12,7 @@ import { ApiSyncModal } from './components/ApiSyncModal';
 import { AddWithPhotoModal } from './components/AddWithPhotoModal';
 import { SetupGuide } from './components/SetupGuide';
 import { AccountModal } from './components/AccountModal';
+import { HistoryModal } from './components/HistoryModal';
 import { ConnectRoomModal } from './components/ConnectRoomModal';
 import { MultiRoomOverviewModal } from './components/MultiRoomOverviewModal';
 import { SearchModal } from './components/SearchModal';
@@ -34,6 +35,7 @@ export function App() {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       const s = useAppStore.getState();
       const dialogs: [boolean, () => void][] = [
+        [!!s.historyView, () => s.setHistoryView(null)],
         [s.isItemModalOpen, () => s.setItemModalOpen(false)],
         [s.isConnectRoomModalOpen, () => s.setConnectRoomModalOpen(false)],
         [s.isRoomShapeModalOpen, () => s.setRoomShapeModalOpen(false)],
@@ -131,6 +133,7 @@ export function App() {
       <AccountModal />
       <ConnectRoomModal />
       <MultiRoomOverviewModal />
+      <HistoryModal />
     </div>
   );
 }

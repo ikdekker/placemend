@@ -4,7 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
 import { Item } from '../types';
-import { X, Tag, Plus, Camera, Image, Check } from 'lucide-react';
+import { X, Tag, Plus, Camera, Image, Check, History } from 'lucide-react';
 
 export const ItemModal: React.FC = () => {
   const {
@@ -282,6 +282,16 @@ export const ItemModal: React.FC = () => {
 
           {/* Submit buttons */}
           <div className="pt-3 flex items-center justify-end gap-2 border-t border-slate-100">
+            {editingItemId && (
+              <button
+                type="button"
+                onClick={() => useAppStore.getState().setHistoryView({ recordId: editingItemId, title: name || 'Item' })}
+                className="mr-auto min-h-[44px] px-3 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <History className="w-4 h-4" />
+                History
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setItemModalOpen(false)}
