@@ -595,7 +595,6 @@ export const PhysicalFurnitureView: React.FC = () => {
         ref={photoInputRef}
         type="file"
         accept="image/*"
-        capture="environment"
         onChange={handlePhotoChange}
         className="hidden"
       />
