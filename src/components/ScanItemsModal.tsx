@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
+import { pickPhoto } from '../utils/pickPhoto';
 import { IntegerInput } from './IntegerInput';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
@@ -204,7 +205,7 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: s
 
           {!results && !scanning && !error && slots.length > 0 && (
             <button
-              onClick={() => inputRef.current?.click()}
+              onClick={() => pickPhoto(inputRef.current)}
               className="w-full py-6 rounded-2xl border-2 border-dashed border-indigo-300 bg-indigo-50/60 hover:bg-indigo-50 text-indigo-700 font-bold text-sm flex flex-col items-center gap-2 cursor-pointer"
             >
               <Camera className="w-6 h-6" />
@@ -224,7 +225,7 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: s
               error={error}
               busy={scanning}
               onRetry={lastImage ? () => sendPhoto(lastImage) : undefined}
-              onRetake={() => inputRef.current?.click()}
+              onRetake={() => pickPhoto(inputRef.current)}
             />
           )}
 
@@ -296,7 +297,7 @@ export const ScanItemsModal: React.FC<{ furnitureId: string; rootContainerId?: s
         {results && (
           <div className="p-3 sm:p-4 border-t border-slate-100 flex items-center gap-2 bg-white">
             <button
-              onClick={() => inputRef.current?.click()}
+              onClick={() => pickPhoto(inputRef.current)}
               disabled={scanning || saving}
               className="px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer flex items-center gap-1.5"
             >

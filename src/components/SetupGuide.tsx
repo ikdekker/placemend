@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { pickPhoto } from '../utils/pickPhoto';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
@@ -111,7 +112,7 @@ const InsidePhotoModal: React.FC<{ furnitureId: string; furnitureName: string; d
         <div className="p-4 overflow-y-auto flex-1 space-y-3">
           {!plan && !scanning && !error && (
             <button
-              onClick={() => inputRef.current?.click()}
+              onClick={() => pickPhoto(inputRef.current)}
               className="w-full py-6 rounded-2xl border-2 border-dashed border-indigo-300 bg-indigo-50/60 text-indigo-700 font-bold text-sm flex flex-col items-center gap-2 cursor-pointer"
             >
               <Camera className="w-6 h-6" />
@@ -129,7 +130,7 @@ const InsidePhotoModal: React.FC<{ furnitureId: string; furnitureName: string; d
               error={error}
               busy={scanning}
               onRetry={lastImage ? () => sendPhoto(lastImage) : undefined}
-              onRetake={() => inputRef.current?.click()}
+              onRetake={() => pickPhoto(inputRef.current)}
             />
           )}
           {plan && (
@@ -150,7 +151,7 @@ const InsidePhotoModal: React.FC<{ furnitureId: string; furnitureName: string; d
         </div>
         {plan && (
           <div className="p-3 border-t border-slate-100 flex items-center gap-2">
-            <button onClick={() => inputRef.current?.click()} className="px-3 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer flex items-center gap-1.5">
+            <button onClick={() => pickPhoto(inputRef.current)} className="px-3 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer flex items-center gap-1.5">
               <Camera className="w-4 h-4" /> Retake
             </button>
             <button

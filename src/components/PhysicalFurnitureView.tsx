@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { pickPhoto } from '../utils/pickPhoto';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAppStore } from '../store/useAppStore';
@@ -660,7 +661,7 @@ export const PhysicalFurnitureView: React.FC = () => {
             </button>
           ) : (
             <button
-              onClick={() => photoInputRef.current?.click()}
+              onClick={() => pickPhoto(photoInputRef.current)}
               className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs sm:text-sm font-bold transition-all cursor-pointer shadow-xs min-h-[42px]"
               title="Add a real photo"
             >
@@ -761,7 +762,7 @@ export const PhysicalFurnitureView: React.FC = () => {
               />
               <div className="absolute top-3 right-3 flex items-center gap-2">
                 <button
-                  onClick={() => photoInputRef.current?.click()}
+                  onClick={() => pickPhoto(photoInputRef.current)}
                   className="px-3 py-2 rounded-xl bg-black/60 backdrop-blur-md text-white text-xs sm:text-sm font-bold hover:bg-black/80 transition-all cursor-pointer flex items-center gap-1.5 shadow-md"
                 >
                   <Camera className="w-4 h-4" />
