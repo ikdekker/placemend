@@ -18,6 +18,8 @@ interface Section {
 interface Layout {
   onTop: boolean;
   sections: Section[];
+  /** Kitchens: the wall cabinets above the countertop */
+  upperSections?: Section[];
 }
 
 const PART_TO_CONTAINER: Record<PartType, ContainerType> = {
@@ -115,12 +117,20 @@ export const BuildLayoutModal: React.FC<{ furnitureId: string; onClose: () => vo
   const applyInteriors = async () => {
     if (!layout || !data) return;
     const now = Date.now();
-    const base = data.containers.filter((c) => !c.parentContainerId && c.zone !== 'upper' && effectiveContainerType(c) !== 'top_surface');
-    const columns = Array.from(new Set(base.map((c) => c.columnIndex ?? 0))).sort((a, b) => a - b);
     let filled = 0;
+    // Each row of the kitchen is matched with its own sections, left to right
+    const rows: { zone: 'base' | 'upper'; sections: Section[] }[] = [
+      { zone: 'base', sections: layout.sections },
+      { zone: 'upper', sections: layout.upperSections ?? [] },
+    ];
     await db.transaction('rw', [db.containers, db.items], async () => {
-      for (let i = 0; i < layout.sections.length && i < columns.length; i++) {
-        const sec = layout.sections[i];
+     for (const row of rows) {
+      const base = data.containers.filter(
+        (c) => !c.parentContainerId && (c.zone === 'upper' ? 'upper' : 'base') === row.zone && effectiveContainerType(c) !== 'top_surface'
+      );
+      const columns = Array.from(new Set(base.map((c) => c.columnIndex ?? 0))).sort((a, b) => a - b);
+      for (let i = 0; i < row.sections.length && i < columns.length; i++) {
+        const sec = row.sections[i];
         if (sec.door === 'none' || sec.parts.length === 0) continue;
         // The door in the matching column (appliances such as the oven are left alone)
         const door = base
@@ -150,6 +160,7 @@ export const BuildLayoutModal: React.FC<{ furnitureId: string; onClose: () => vo
         await db.containers.update(door.id, { doorCount: sec.door === 'pair' ? 2 : 1, updatedAt: now });
         filled++;
       }
+     }
     });
     return filled;
   };

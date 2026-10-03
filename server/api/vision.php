@@ -115,6 +115,11 @@ Describe its structure, not its contents:
     - type: shelf, rail (hanging rail), drawer, basket (wire/mesh basket or box), or open (open space without a shelf).
     - name: short, e.g. "Top shelf", "Hanging rail", "Drawer 2", "Shoe shelf". Number repeated parts.
 - onTop: true if things are stored on top of the furniture.
+Kitchen walls (base units under a countertop, often with wall cabinets above it):
+- sections are only the BASE units under the countertop, left to right. A built-in appliance (oven, dishwasher,
+  fridge) is its own section with door "none" and no parts, so the sections line up with the units.
+- upperSections are the WALL cabinets above the countertop, left to right, described the same way
+  (an extractor hood under a cabinet is not a section). Leave upperSections empty for other furniture.
 Count shelves and drawers carefully. Ignore the items themselves (clothes, boxes) except to tell a shelf from a rail.
 PROMPT;
     $partSchema = [
@@ -130,6 +135,18 @@ PROMPT;
         'properties' => [
             'onTop' => ['type' => 'BOOLEAN'],
             'sections' => [
+                'type' => 'ARRAY',
+                'items' => [
+                    'type' => 'OBJECT',
+                    'properties' => [
+                        'width' => ['type' => 'INTEGER'],
+                        'door' => ['type' => 'STRING', 'enum' => ['none', 'single', 'pair']],
+                        'parts' => ['type' => 'ARRAY', 'items' => $partSchema],
+                    ],
+                    'required' => ['width', 'door', 'parts'],
+                ],
+            ],
+            'upperSections' => [
                 'type' => 'ARRAY',
                 'items' => [
                     'type' => 'OBJECT',
@@ -352,23 +369,28 @@ if ($mode === 'layout') {
         $reason = $data['candidates'][0]['finishReason'] ?? 'unknown';
         sendJsonError("The AI could not recognise the layout (finish reason: $reason). Try a photo with all doors open.", 502);
     }
-    $sections = [];
-    foreach (array_slice($parsed['sections'], 0, 6) as $sec) {
-        $parts = [];
-        foreach (array_slice(is_array($sec['parts'] ?? null) ? $sec['parts'] : [], 0, 16) as $p) {
-            $type = in_array($p['type'] ?? '', ['shelf', 'rail', 'drawer', 'basket', 'open'], true) ? $p['type'] : 'shelf';
-            $parts[] = ['type' => $type, 'name' => substr(trim((string)($p['name'] ?? ucfirst($type))), 0, 60) ?: ucfirst($type)];
+    $readLayoutSections = function ($list) {
+        $out = [];
+        foreach (array_slice(is_array($list) ? $list : [], 0, 6) as $sec) {
+            $parts = [];
+            foreach (array_slice(is_array($sec['parts'] ?? null) ? $sec['parts'] : [], 0, 16) as $p) {
+                $type = in_array($p['type'] ?? '', ['shelf', 'rail', 'drawer', 'basket', 'open'], true) ? $p['type'] : 'shelf';
+                $parts[] = ['type' => $type, 'name' => substr(trim((string)($p['name'] ?? ucfirst($type))), 0, 60) ?: ucfirst($type)];
+            }
+            $out[] = [
+                'width' => ((int)($sec['width'] ?? 1)) >= 2 ? 2 : 1,
+                'door' => in_array($sec['door'] ?? '', ['none', 'single', 'pair'], true) ? $sec['door'] : 'none',
+                'parts' => $parts,
+            ];
         }
-        $sections[] = [
-            'width' => ((int)($sec['width'] ?? 1)) >= 2 ? 2 : 1,
-            'door' => in_array($sec['door'] ?? '', ['none', 'single', 'pair'], true) ? $sec['door'] : 'none',
-            'parts' => $parts,
-        ];
-    }
+        return $out;
+    };
+    $sections = $readLayoutSections($parsed['sections']);
+    $upperSections = $readLayoutSections($parsed['upperSections'] ?? null);
     sendJsonResponse([
         'success' => true,
         'model' => $model,
-        'layout' => ['onTop' => (bool)($parsed['onTop'] ?? false), 'sections' => $sections],
+        'layout' => ['onTop' => (bool)($parsed['onTop'] ?? false), 'sections' => $sections, 'upperSections' => $upperSections],
         'scansLeftToday' => max(0, $dailyLimit - $used - 1),
     ]);
 }
