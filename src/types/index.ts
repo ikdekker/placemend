@@ -102,6 +102,9 @@ export type Furniture = {
   columns?: number;
   // Relative width per front column, e.g. [1, 2, 1] for a PAX with a 50 cm, 100 cm and 50 cm frame
   columnWidths?: number[];
+  // Kitchen runs: the row of wall cabinets above the countertop has its own columns
+  upperColumns?: number;
+  upperColumnWidths?: number[];
   createdAt: number;
   updatedAt: number;
 };
@@ -115,6 +118,7 @@ export type ContainerType =
   | 'cabinet_door'
   | 'hanging_rod'
   | 'top_surface'
+  | 'appliance' // oven, hood, dishwasher, fridge, microwave: drawn as the appliance, may still hold things
   | 'general';
 
 export type Container = {
@@ -129,6 +133,8 @@ export type Container = {
   columnIndex?: number;
   // Doors: how many door leaves this front has (2 = a pair sharing one interior)
   doorCount?: number;
+  // 'upper' = wall cabinets above the countertop (kitchen runs); otherwise the main/base cabinet
+  zone?: 'upper';
   notes?: string;
   createdAt: number;
   updatedAt: number;

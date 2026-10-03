@@ -3,7 +3,8 @@ import { Container, ContainerType, Furniture, FurnitureType } from '../types';
 import { roundCm } from './measure';
 
 // Shapes returned by api/vision.php
-export type FrontType = 'door' | 'pair' | 'drawer' | 'shelf' | 'basket' | 'open';
+export type FrontType = 'door' | 'pair' | 'drawer' | 'shelf' | 'basket' | 'open' | Appliance | 'sink';
+type Appliance = 'oven' | 'dishwasher' | 'fridge' | 'microwave' | 'hood';
 export type PartType = 'shelf' | 'rail' | 'drawer' | 'basket' | 'open';
 export interface IdentifiedFurniture {
   name: string;
@@ -14,6 +15,9 @@ export interface IdentifiedFurniture {
   color: string;
   hasDoors: boolean;
   sections: { width: 1 | 2; fronts: FrontType[] }[];
+  /** Kitchens: wall cabinets above the countertop */
+  upperSections?: { width: 1 | 2; fronts: FrontType[] }[];
+  topOfCabinets?: boolean;
 }
 export interface LayoutSection {
   width: 1 | 2;
@@ -28,6 +32,12 @@ const FRONT_TYPE: Record<FrontType, ContainerType> = {
   shelf: 'shelf',
   basket: 'box',
   open: 'shelf',
+  oven: 'appliance',
+  dishwasher: 'appliance',
+  fridge: 'appliance',
+  microwave: 'appliance',
+  hood: 'appliance',
+  sink: 'cabinet_door',
 };
 export const PART_TYPE: Record<PartType, ContainerType> = {
   shelf: 'shelf',
@@ -51,6 +61,12 @@ const FRONT_LABEL: Record<Exclude<FrontType, 'door' | 'pair'>, string> = {
   shelf: 'Shelf',
   basket: 'Basket',
   open: 'Open space',
+  oven: 'Oven',
+  dishwasher: 'Dishwasher',
+  fridge: 'Fridge',
+  microwave: 'Microwave',
+  hood: 'Extractor hood',
+  sink: 'Under-sink cabinet',
 };
 
 /** Create the furniture in a room with the fronts the AI saw; returns the new furniture id */
@@ -81,34 +97,52 @@ export async function createFurnitureFromPhoto(
     updatedAt: now,
   };
 
-  const doorCount = ident.sections.filter((s) => s.fronts.some((f) => f === 'door' || f === 'pair')).length;
-  let doorIndex = 0;
   let seq = 0;
   const containers: Container[] = [];
-  ident.sections.forEach((sec, col) => {
-    const counters: Record<string, number> = {};
-    sec.fronts.forEach((front, row) => {
-      let name: string;
-      if (front === 'door' || front === 'pair') {
-        name = doorName(doorIndex++, doorCount, front === 'pair');
-      } else {
-        counters[front] = (counters[front] || 0) + 1;
-        const total = sec.fronts.filter((f) => f === front).length;
-        name = total > 1 ? `${FRONT_LABEL[front]} ${counters[front]}` : FRONT_LABEL[front];
-      }
-      containers.push({
-        id: `cont-${now}-${seq++}`,
-        furnitureId: id,
-        name,
-        type: FRONT_TYPE[front],
-        ...(front === 'pair' ? { doorCount: 2 } : front === 'door' ? { doorCount: 1 } : {}),
-        columnIndex: col,
-        orderIndex: row,
-        createdAt: now,
-        updatedAt: now,
+  const kitchen = ident.type === 'kitchen_counter';
+  const addRow = (sections: { width: 1 | 2; fronts: FrontType[] }[], upper: boolean) => {
+    const doorCount = sections.filter((sec) => sec.fronts.some((f) => f === 'door' || f === 'pair')).length;
+    let doorIndex = 0;
+    sections.forEach((sec, col) => {
+      const counters: Record<string, number> = {};
+      sec.fronts.forEach((front, row) => {
+        let name: string;
+        if (front === 'door' || front === 'pair') {
+          const door = doorName(doorIndex++, doorCount, front === 'pair');
+          // "Left door" on the wall reads better as "Left wall cabinet"
+          name = upper ? door.replace(/doors?$/i, 'wall cabinet').replace(/^(Door|Doors)$/, 'Wall cabinet') : door;
+        } else {
+          counters[front] = (counters[front] || 0) + 1;
+          const total = sec.fronts.filter((f) => f === front).length;
+          const label = upper && front === 'shelf' ? 'Wall shelf' : FRONT_LABEL[front];
+          name = total > 1 ? `${label} ${counters[front]}` : label;
+        }
+        containers.push({
+          id: `cont-${now}-${seq++}`,
+          furnitureId: id,
+          name,
+          type: FRONT_TYPE[front],
+          ...(upper ? { zone: 'upper' as const } : {}),
+          ...(front === 'pair' ? { doorCount: 2 } : front === 'door' || front === 'sink' ? { doorCount: 1 } : {}),
+          columnIndex: col,
+          orderIndex: row,
+          createdAt: now,
+          updatedAt: now,
+        });
       });
     });
-  });
+  };
+  addRow(ident.sections, false);
+  const upper = ident.upperSections ?? [];
+  if (upper.length) {
+    addRow(upper, true);
+    furniture.upperColumns = upper.length;
+    furniture.upperColumnWidths = upper.map((sec) => sec.width);
+  }
+  const surface = (name: string, zone?: 'upper') =>
+    containers.push({ id: `cont-${now}-${seq++}`, furnitureId: id, name, type: 'top_surface', ...(zone ? { zone } : {}), orderIndex: 0, createdAt: now, updatedAt: now });
+  if (kitchen) surface('Countertop');
+  if (upper.length && ident.topOfCabinets) surface('Top of cabinets', 'upper');
 
   await db.transaction('rw', [db.furniture, db.containers], async () => {
     await db.furniture.add(furniture);

@@ -149,6 +149,7 @@ PROMPT;
 // Identify mode: what is this piece of furniture (photographed as it stands, doors closed or open)
 $furnitureTypes = ['desk', 'closet', 'wardrobe', 'bookshelf', 'storage_rack', 'dresser', 'cabinet', 'table', 'bed', 'sofa',
     'workbench', 'box_stack', 'kitchen_counter', 'kitchen_island', 'appliance', 'other'];
+$frontTypes = ['door', 'pair', 'drawer', 'shelf', 'basket', 'open', 'oven', 'dishwasher', 'fridge', 'microwave', 'hood', 'sink'];
 if ($mode === 'identify') {
     $prompt = <<<PROMPT
 You are adding a piece of furniture to a home inventory app from a photo of it, taken in room "{$roomName}".
@@ -163,6 +164,14 @@ Identify it and describe its front:
     drawer, shelf (open shelf), basket (open box/basket/bin) or open (open space). A tall door covering the whole section is one front.
 - hasDoors: true if any section has a door or pair.
 If it's not storage furniture (e.g. a plain table or a sofa), give a single section with an appropriate front such as one shelf.
+Kitchens (a kitchen wall with base cabinets, a countertop and often wall cabinets): use furnitureType kitchen_counter.
+- sections are the BASE units under the countertop, left to right. Besides door/pair/drawer, a base front can be
+  oven, dishwasher, fridge, microwave, or sink (the door of the cabinet under the sink).
+- upperSections are the WALL cabinets above the countertop, left to right, with their own widths
+  (they rarely line up with the base units). Fronts: door, pair, shelf (open wall shelf), open, microwave,
+  or hood (the extractor hood, usually under a narrow wall cabinet). Leave upperSections empty if there are none.
+- height is the height of the base units with the countertop (about 0.9 m); depth is the countertop depth.
+- topOfCabinets: true if things are stored on top of the wall cabinets.
 PROMPT;
     $schema = [
         'type' => 'OBJECT',
@@ -182,12 +191,27 @@ PROMPT;
                         'width' => ['type' => 'INTEGER'],
                         'fronts' => [
                             'type' => 'ARRAY',
-                            'items' => ['type' => 'STRING', 'enum' => ['door', 'pair', 'drawer', 'shelf', 'basket', 'open']],
+                            'items' => ['type' => 'STRING', 'enum' => $frontTypes],
                         ],
                     ],
                     'required' => ['width', 'fronts'],
                 ],
             ],
+            'upperSections' => [
+                'type' => 'ARRAY',
+                'items' => [
+                    'type' => 'OBJECT',
+                    'properties' => [
+                        'width' => ['type' => 'INTEGER'],
+                        'fronts' => [
+                            'type' => 'ARRAY',
+                            'items' => ['type' => 'STRING', 'enum' => $frontTypes],
+                        ],
+                    ],
+                    'required' => ['width', 'fronts'],
+                ],
+            ],
+            'topOfCabinets' => ['type' => 'BOOLEAN'],
         ],
         'required' => ['name', 'furnitureType', 'width', 'depth', 'height', 'color', 'hasDoors', 'sections'],
     ];
@@ -290,14 +314,19 @@ if ($mode === 'identify') {
         sendJsonError("The AI could not recognise the furniture (finish reason: $reason). Try a photo of the whole piece.", 502);
     }
     $meters = fn($v, $min, $max, $default) => is_numeric($v) && $v > 0 ? round(max($min, min($max, (float)$v)), 2) : $default;
-    $sections = [];
-    foreach (array_slice(is_array($parsed['sections'] ?? null) ? $parsed['sections'] : [], 0, 6) as $sec) {
-        $fronts = [];
-        foreach (array_slice(is_array($sec['fronts'] ?? null) ? $sec['fronts'] : [], 0, 10) as $fr) {
-            if (in_array($fr, ['door', 'pair', 'drawer', 'shelf', 'basket', 'open'], true)) $fronts[] = $fr;
+    $readSections = function ($list) use ($frontTypes) {
+        $out = [];
+        foreach (array_slice(is_array($list) ? $list : [], 0, 6) as $sec) {
+            $fronts = [];
+            foreach (array_slice(is_array($sec['fronts'] ?? null) ? $sec['fronts'] : [], 0, 10) as $fr) {
+                if (in_array($fr, $frontTypes, true)) $fronts[] = $fr;
+            }
+            $out[] = ['width' => ((int)($sec['width'] ?? 1)) >= 2 ? 2 : 1, 'fronts' => $fronts ?: ['shelf']];
         }
-        $sections[] = ['width' => ((int)($sec['width'] ?? 1)) >= 2 ? 2 : 1, 'fronts' => $fronts ?: ['shelf']];
-    }
+        return $out;
+    };
+    $sections = $readSections($parsed['sections'] ?? null);
+    $upperSections = $readSections($parsed['upperSections'] ?? null);
     $color = preg_match('/^#[0-9a-fA-F]{6}$/', (string)($parsed['color'] ?? '')) ? $parsed['color'] : '#64748b';
     sendJsonResponse([
         'success' => true,
@@ -311,6 +340,8 @@ if ($mode === 'identify') {
             'color' => $color,
             'hasDoors' => (bool)($parsed['hasDoors'] ?? false),
             'sections' => $sections ?: [['width' => 1, 'fronts' => ['shelf']]],
+            'upperSections' => $upperSections,
+            'topOfCabinets' => (bool)($parsed['topOfCabinets'] ?? false),
         ],
         'scansLeftToday' => max(0, $dailyLimit - $used - 1),
     ]);

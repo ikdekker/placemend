@@ -373,8 +373,8 @@ function mcpCall(string $apiKey, string $name, array $args): string {
             foreach ($idx['containers'] as $c) $children[$c['parentContainerId'] ?? ''][] = $c;
             $sortC = fn(&$list) => usort($list, fn($a, $b) => [($a['columnIndex'] ?? 0), ($a['orderIndex'] ?? 0)] <=> [($b['columnIndex'] ?? 0), ($b['orderIndex'] ?? 0)]);
             $walk = function (array $c, int $depth) use (&$walk, &$out, $children, $counts, $sortC) {
-                $out[] = str_repeat('  ', $depth) . sprintf('- %s [%s] (container_id: %s) — %d item(s)',
-                    $c['name'] ?? '?', $c['type'] ?? 'general', $c['id'], $counts[$c['id']] ?? 0);
+                $out[] = str_repeat('  ', $depth) . sprintf('- %s [%s%s] (container_id: %s) — %d item(s)',
+                    $c['name'] ?? '?', $c['type'] ?? 'general', ($c['zone'] ?? '') === 'upper' ? ', wall cabinet' : '', $c['id'], $counts[$c['id']] ?? 0);
                 $kids = $children[$c['id']] ?? [];
                 $sortC($kids);
                 foreach ($kids as $k) $walk($k, $depth + 1);

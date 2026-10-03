@@ -9,6 +9,7 @@ const TYPE_OPTIONS: { type: ContainerType; label: string }[] = [
   { type: 'box', label: 'Box' },
   { type: 'top_surface', label: 'Top surface' },
   { type: 'hanging_rod', label: 'Rail' },
+  { type: 'appliance', label: 'Appliance' },
 ];
 
 interface Props {
@@ -29,12 +30,15 @@ interface Props {
   onChangeColumnWidth?: (w: number) => void;
   /** Doors only: open the door to add shelves, rails and drawers behind it */
   onEditInside?: () => void;
+  /** Kitchen runs: on the wall (above the countertop) or in the base cabinet */
+  zone?: 'upper' | 'base';
+  onChangeZone?: (zone: 'upper' | 'base') => void;
 }
 
 /** Bottom sheet for one compartment while editing a furniture layout */
 export const CompartmentEditSheet: React.FC<Props> = ({
   container, kind, itemCount, canMove, onRename, onChangeType, onMove, onDelete, onClose,
-  doorCount, onChangeDoorCount, columnWidth, onChangeColumnWidth, onEditInside,
+  doorCount, onChangeDoorCount, columnWidth, onChangeColumnWidth, onEditInside, zone, onChangeZone,
 }) => {
   const [name, setName] = useState(container.name);
   useEffect(() => setName(container.name), [container.id, container.name]);
@@ -103,6 +107,25 @@ export const CompartmentEditSheet: React.FC<Props> = ({
             ))}
           </div>
         </div>
+
+        {zone && onChangeZone && (
+          <div>
+            <span className="block text-xs font-bold text-slate-600 mb-1.5">Where</span>
+            <div className="grid grid-cols-2 gap-2">
+              {(['upper', 'base'] as const).map((z) => (
+                <button
+                  key={z}
+                  type="button"
+                  onClick={() => onChangeZone(z)}
+                  aria-pressed={zone === z}
+                  className={`py-2.5 rounded-xl text-xs font-bold cursor-pointer ${zone === z ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                >
+                  {z === 'upper' ? 'On the wall (above)' : 'Base (below counter)'}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {doorCount !== undefined && onChangeDoorCount && (
           <div>

@@ -36,6 +36,12 @@ const FRONT_LABEL: Record<string, string> = {
   shelf: 'Shelf',
   basket: 'Basket',
   open: 'Open',
+  oven: 'Oven',
+  dishwasher: 'Dishwasher',
+  fridge: 'Fridge',
+  microwave: 'Microwave',
+  hood: 'Hood',
+  sink: 'Under sink',
 };
 
 /** Step 1 of the photo setup: photograph a piece of furniture, check what the AI recognised, add it to the room */
@@ -194,7 +200,25 @@ export const AddWithPhotoModal: React.FC = () => {
                 ))}
               </div>
               <div>
-                <span className="block text-xs font-bold text-slate-600 mb-1">Front, left to right</span>
+                {!!ident.upperSections?.length && (
+                  <>
+                    <span className="block text-xs font-bold text-slate-600 mb-1">Wall cabinets, left to right</span>
+                    <div className="grid gap-1.5 mb-2" style={{ gridTemplateColumns: ident.upperSections.map((s) => `minmax(0, ${s.width}fr)`).join(' ') }}>
+                      {ident.upperSections.map((s, i) => (
+                        <div key={i} className="rounded-xl border-2 border-slate-200 bg-slate-50 p-1.5 space-y-1">
+                          {s.fronts.map((f, j) => (
+                            <div key={j} className="text-[11px] font-bold text-slate-700 bg-white rounded-md px-1.5 py-1 border border-slate-200 truncate">
+                              {FRONT_LABEL[f]}
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+                <span className="block text-xs font-bold text-slate-600 mb-1">
+                  {ident.upperSections?.length ? 'Base cabinets, left to right' : 'Front, left to right'}
+                </span>
                 <div className="grid gap-1.5" style={{ gridTemplateColumns: ident.sections.map((s) => `minmax(0, ${s.width}fr)`).join(' ') }}>
                   {ident.sections.map((s, i) => (
                     <div key={i} className="rounded-xl border-2 border-slate-200 bg-slate-50 p-1.5 space-y-1">

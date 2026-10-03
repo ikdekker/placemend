@@ -21,7 +21,8 @@ import { ScanItemsModal } from './ScanItemsModal';
 import { CompartmentEditSheet } from './CompartmentEditSheet';
 import { BuildLayoutModal } from './BuildLayoutModal';
 import { scheduleAutoSync } from '../services/apiSync';
-import { effectiveContainerType, isOpenKind } from '../utils/containerKind';
+import { applianceKind, effectiveContainerType, isOpenKind, isUnderSink } from '../utils/containerKind';
+import { ApplianceFace } from './ApplianceFace';
 
 function cleanContainerName(name: string): string {
   return name.replace(/\s*\(.*?\)\s*/g, '').trim();
@@ -117,33 +118,50 @@ export const PhysicalFurnitureView: React.FC = () => {
     (itemCountMap.get(container.id) || 0) +
     containers.filter((c) => c.parentContainerId === container.id).reduce((acc, c) => acc + (itemCountMap.get(c.id) || 0), 0);
 
-  const facadeTop = topLevelContainers
-    .filter((c) => effectiveContainerType(c) === 'top_surface')
-    .sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
-  const facadeBodyAll = topLevelContainers.filter((c) => effectiveContainerType(c) !== 'top_surface');
-  // Without an explicit column setting, don't spread one lower shelf over three empty columns
-  const facadeNumColumns = Math.max(1, Math.min(4, furniture.columns || Math.min(3, facadeBodyAll.length || 1)));
-  const facadeColumns: Container[][] = Array.from({ length: facadeNumColumns }, () => []);
-  facadeBodyAll.forEach((container, idx) => {
-    let colIdx = container.columnIndex;
-    if (colIdx === undefined || colIdx < 0 || colIdx >= facadeNumColumns) colIdx = idx % facadeNumColumns;
-    facadeColumns[colIdx].push(container);
-  });
-  facadeColumns.forEach((col) => col.sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0)));
-  const facadeBody = facadeBodyAll;
+  // Kitchen runs have a second row: wall cabinets above the countertop, with their own columns
+  type Zone = 'base' | 'upper';
+  const zoneOf = (c: Container): Zone => (c.zone === 'upper' ? 'upper' : 'base');
+  const canHaveWallCabinets = ['kitchen_counter', 'cabinet', 'dresser', 'desk', 'workbench', 'other'].includes(furniture.type);
+  const maxColumns = furniture.type === 'kitchen_counter' ? 6 : 4;
+  const buildZone = (zone: Zone) => {
+    const inZone = topLevelContainers.filter((c) => zoneOf(c) === zone);
+    const top = inZone.filter((c) => effectiveContainerType(c) === 'top_surface').sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+    const body = inZone.filter((c) => effectiveContainerType(c) !== 'top_surface');
+    const setting = zone === 'upper' ? furniture.upperColumns : furniture.columns;
+    // Without an explicit column setting, don't spread one lower shelf over three empty columns
+    const num = Math.max(1, Math.min(maxColumns, setting || Math.min(3, body.length || 1)));
+    const columns: Container[][] = Array.from({ length: num }, () => []);
+    body.forEach((container, idx) => {
+      let colIdx = container.columnIndex;
+      if (colIdx === undefined || colIdx < 0 || colIdx >= num) colIdx = idx % num;
+      columns[colIdx].push(container);
+    });
+    columns.forEach((col) => col.sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0)));
+    return { top, body, num, columns };
+  };
+  const baseZone = buildZone('base');
+  const upperZone = buildZone('upper');
+  const zones = { base: baseZone, upper: upperZone };
+  const facadeTop = baseZone.top;
+  const facadeNumColumns = baseZone.num;
+  const facadeColumns = baseZone.columns;
+  const facadeBody = baseZone.body;
   const facadeIsOpen = facadeBody.every((c) => isOpenKind(effectiveContainerType(c)));
+  const hasUpper = upperZone.top.length + upperZone.body.length > 0;
 
   // --- Layout editing (in place on the front view) ---
   const touchLayout = () => scheduleAutoSync();
 
   // Give every compartment an explicit column/order (older data relies on implicit placement)
   const normalizeLayout = async () => {
-    await db.furniture.update(furniture.id, { columns: facadeNumColumns });
-    for (let col = 0; col < facadeColumns.length; col++) {
-      for (let i = 0; i < facadeColumns[col].length; i++) {
-        const c = facadeColumns[col][i];
-        if (c.columnIndex !== col || c.orderIndex !== i) {
-          await db.containers.update(c.id, { columnIndex: col, orderIndex: i });
+    await db.furniture.update(furniture.id, { columns: facadeNumColumns, ...(hasUpper ? { upperColumns: upperZone.num } : {}) });
+    for (const z of [baseZone, upperZone]) {
+      for (let col = 0; col < z.columns.length; col++) {
+        for (let i = 0; i < z.columns[col].length; i++) {
+          const c = z.columns[col][i];
+          if (c.columnIndex !== col || c.orderIndex !== i) {
+            await db.containers.update(c.id, { columnIndex: col, orderIndex: i });
+          }
         }
       }
     }
@@ -151,14 +169,22 @@ export const PhysicalFurnitureView: React.FC = () => {
 
   // Leaving edit mode: drop empty columns so the front doesn't keep blank gaps
   const compactLayout = async () => {
-    const nonEmpty = facadeColumns.filter((col) => col.length > 0);
-    const keptWidths = facadeColumns.map((_, i) => columnWidth(i)).filter((_, i) => facadeColumns[i].length > 0);
-    await db.furniture.update(furniture.id, { columns: Math.max(1, nonEmpty.length), columnWidths: keptWidths, updatedAt: Date.now() });
-    for (let col = 0; col < nonEmpty.length; col++) {
-      for (let i = 0; i < nonEmpty[col].length; i++) {
-        const c = nonEmpty[col][i];
-        if (c.columnIndex !== col || c.orderIndex !== i) {
-          await db.containers.update(c.id, { columnIndex: col, orderIndex: i, updatedAt: Date.now() });
+    for (const zone of ['base', 'upper'] as Zone[]) {
+      const z = zones[zone];
+      const nonEmpty = z.columns.filter((col) => col.length > 0);
+      const keptWidths = z.columns.map((_, i) => columnWidth(i, zone)).filter((_, i) => z.columns[i].length > 0);
+      await db.furniture.update(
+        furniture.id,
+        zone === 'base'
+          ? { columns: Math.max(1, nonEmpty.length), columnWidths: keptWidths, updatedAt: Date.now() }
+          : { upperColumns: nonEmpty.length || undefined, upperColumnWidths: nonEmpty.length ? keptWidths : undefined, updatedAt: Date.now() }
+      );
+      for (let col = 0; col < nonEmpty.length; col++) {
+        for (let i = 0; i < nonEmpty[col].length; i++) {
+          const c = nonEmpty[col][i];
+          if (c.columnIndex !== col || c.orderIndex !== i) {
+            await db.containers.update(c.id, { columnIndex: col, orderIndex: i, updatedAt: Date.now() });
+          }
         }
       }
     }
@@ -177,19 +203,26 @@ export const PhysicalFurnitureView: React.FC = () => {
     }
   };
 
-  const addSlot = async (colIdx: number, type: ContainerType = 'drawer') => {
+  const addSlot = async (colIdx: number, type: ContainerType = 'drawer', zone: Zone = 'base') => {
     const now = Date.now();
-    const col = facadeColumns[colIdx] || [];
-    const defaultName = { drawer: 'Drawer', cabinet_door: 'Door', shelf: 'Shelf', top_surface: 'Top' }[type as string] || 'Compartment';
+    const z = zones[zone];
+    const col = (zone === 'upper' && !hasUpper ? [] : z.columns[colIdx]) || [];
+    const defaultName =
+      zone === 'upper'
+        ? ({ top_surface: 'Top of cabinets', shelf: 'Wall shelf' } as Record<string, string>)[type] || 'Wall cabinet'
+        : ({ drawer: 'Drawer', cabinet_door: 'Door', shelf: 'Shelf', top_surface: furniture.type === 'kitchen_counter' ? 'Countertop' : 'Top' } as Record<string, string>)[type] || 'Compartment';
     const id = `cont-${now}`;
-    if (colIdx >= facadeNumColumns) {
-      await db.furniture.update(furniture.id, { columns: colIdx + 1, updatedAt: now });
+    if (zone === 'upper' && !hasUpper) {
+      await db.furniture.update(furniture.id, { upperColumns: Math.max(1, colIdx + 1), updatedAt: now });
+    } else if (colIdx >= z.num) {
+      await db.furniture.update(furniture.id, zone === 'upper' ? { upperColumns: colIdx + 1, updatedAt: now } : { columns: colIdx + 1, updatedAt: now });
     }
     await db.containers.add({
       id,
       furnitureId: furniture.id,
       name: defaultName,
       type,
+      ...(zone === 'upper' ? { zone: 'upper' as const } : {}),
       columnIndex: colIdx,
       orderIndex: col.length,
       createdAt: now,
@@ -200,9 +233,12 @@ export const PhysicalFurnitureView: React.FC = () => {
   };
 
   const slotPosition = (id: string) => {
-    for (let col = 0; col < facadeColumns.length; col++) {
-      const row = facadeColumns[col].findIndex((c) => c.id === id);
-      if (row >= 0) return { col, row };
+    for (const zone of ['base', 'upper'] as Zone[]) {
+      const cols = zones[zone].columns;
+      for (let col = 0; col < cols.length; col++) {
+        const row = cols[col].findIndex((c) => c.id === id);
+        if (row >= 0) return { zone, col, row };
+      }
     }
     return null;
   };
@@ -211,22 +247,41 @@ export const PhysicalFurnitureView: React.FC = () => {
     const pos = slotPosition(container.id);
     if (!pos) return;
     const now = Date.now();
+    const zoneCols = zones[pos.zone].columns;
     if (dy !== 0) {
-      const column = facadeColumns[pos.col];
+      const column = zoneCols[pos.col];
       const other = column[pos.row + dy];
       if (!other) return;
       await db.containers.update(container.id, { orderIndex: pos.row + dy, updatedAt: now });
       await db.containers.update(other.id, { orderIndex: pos.row, updatedAt: now });
     } else if (dx !== 0) {
       const target = pos.col + dx;
-      if (target < 0 || target >= facadeNumColumns) return;
-      await db.containers.update(container.id, { columnIndex: target, orderIndex: facadeColumns[target].length, updatedAt: now });
+      if (target < 0 || target >= zones[pos.zone].num) return;
+      await db.containers.update(container.id, { columnIndex: target, orderIndex: zoneCols[target].length, updatedAt: now });
       // Close the gap left behind in the source column
-      const rest = facadeColumns[pos.col].filter((c) => c.id !== container.id);
+      const rest = zoneCols[pos.col].filter((c) => c.id !== container.id);
       for (let i = 0; i < rest.length; i++) {
         if (rest[i].orderIndex !== i) await db.containers.update(rest[i].id, { orderIndex: i, updatedAt: now });
       }
     }
+    touchLayout();
+  };
+
+  /** Move a front between the wall cabinets and the base cabinet (end of the same column, or the last one) */
+  const moveToZone = async (container: Container, zone: Zone) => {
+    const pos = slotPosition(container.id);
+    if (!pos || pos.zone === zone) return;
+    const now = Date.now();
+    const target = zones[zone];
+    const exists = zone === 'base' || hasUpper;
+    const col = exists ? Math.min(pos.col, target.num - 1) : 0;
+    if (zone === 'upper' && !hasUpper) await db.furniture.update(furniture.id, { upperColumns: 1, updatedAt: now });
+    await db.containers.update(container.id, {
+      zone: zone === 'upper' ? 'upper' : undefined,
+      columnIndex: col,
+      orderIndex: exists ? target.columns[col].length : 0,
+      updatedAt: now,
+    });
     touchLayout();
   };
 
@@ -244,11 +299,11 @@ export const PhysicalFurnitureView: React.FC = () => {
   const editingSlot = editingSlotId ? containers.find((c) => c.id === editingSlotId) : undefined;
   const editingPos = editingSlot ? slotPosition(editingSlot.id) : null;
 
-  const addTile = (colIdx: number, label = 'Add') => (
+  const addTile = (colIdx: number, label = 'Add', zone: Zone = 'base') => (
     <button
-      key={`add-${colIdx}`}
+      key={`add-${zone}-${colIdx}`}
       type="button"
-      onClick={() => addSlot(colIdx)}
+      onClick={() => addSlot(colIdx, zone === 'upper' ? 'cabinet_door' : 'drawer', zone)}
       className="w-full min-h-[48px] rounded-2xl border-2 border-dashed border-blue-300 bg-blue-50/60 hover:bg-blue-100 text-blue-700 text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 cursor-pointer"
     >
       <Plus className="w-4 h-4 stroke-[2.5]" />
@@ -261,19 +316,29 @@ export const PhysicalFurnitureView: React.FC = () => {
   const tallMinHeight = isTall ? '58vh' : undefined;
 
   // Relative column widths (PAX: [1, 2, 1] for a 50/100/50 cm combination)
-  const columnWidth = (col: number) => furniture.columnWidths?.[col] || 1;
+  const columnWidth = (col: number, zone: Zone = 'base') =>
+    (zone === 'upper' ? furniture.upperColumnWidths : furniture.columnWidths)?.[col] || 1;
   // An open door's column gets at least double width while open, so its interior is readable
-  const gridColumns = facadeColumns
-    .map((col, i) => {
-      const w = col.some((c) => c.id === openDoorId) ? Math.max(2, columnWidth(i)) : columnWidth(i);
-      return `minmax(0, ${w}fr)`;
-    })
-    .join(' ');
-  const setColumnWidth = async (col: number, width: number) => {
-    const widths = Array.from({ length: facadeNumColumns }, (_, i) => columnWidth(i));
+  const gridColumnsFor = (zone: Zone) =>
+    zones[zone].columns
+      .map((col, i) => {
+        const w = col.some((c) => c.id === openDoorId) ? Math.max(2, columnWidth(i, zone)) : columnWidth(i, zone);
+        return `minmax(0, ${w}fr)`;
+      })
+      .join(' ');
+  const gridColumns = gridColumnsFor('base');
+  const setColumnWidth = async (col: number, width: number, zone: Zone = 'base') => {
+    const widths = Array.from({ length: zones[zone].num }, (_, i) => columnWidth(i, zone));
     widths[col] = width;
-    await db.furniture.update(furniture.id, { columnWidths: widths, updatedAt: Date.now() });
+    await db.furniture.update(furniture.id, zone === 'upper' ? { upperColumnWidths: widths, updatedAt: Date.now() } : { columnWidths: widths, updatedAt: Date.now() });
     touchLayout();
+  };
+  /** Where a base column sits along the run, as fractions (for the sink and hob drawn on the countertop) */
+  const baseColumnSpan = (col: number) => {
+    const widths = facadeColumns.map((_, i) => columnWidth(i));
+    const total = widths.reduce((a, b) => a + b, 0) || 1;
+    const left = widths.slice(0, col).reduce((a, b) => a + b, 0);
+    return { left: left / total, width: widths[col] / total };
   };
 
   // Compartments behind a door (or inside any compartment), top to bottom
@@ -370,11 +435,12 @@ export const PhysicalFurnitureView: React.FC = () => {
     );
   };
 
-  const renderFront = (container: Container, stackSize: number, openFrame: boolean) =>
-    openDoorId === container.id ? renderOpenDoor(container) : renderSlot(container, stackSize, openFrame);
+  const renderFront = (container: Container, stackSize: number, openFrame: boolean, upper = false) =>
+    openDoorId === container.id ? renderOpenDoor(container) : renderSlot(container, stackSize, openFrame, false, upper);
 
-  const renderSlot = (container: Container, stackSize: number, openFrame: boolean, compact = false) => {
+  const renderSlot = (container: Container, stackSize: number, openFrame: boolean, compact = false, upper = false) => {
     const kind = effectiveContainerType(container);
+    const appliance = kind === 'appliance' ? applianceKind(container.name) ?? 'other' : null;
     const totalCount = containerTotal(container);
     const isMatch = isSearching && matchingContainerIds.has(container.id);
     const isDimmed = isSearching && !isMatch;
@@ -382,6 +448,10 @@ export const PhysicalFurnitureView: React.FC = () => {
     const color = furniture.color || '#0f766e';
     const minHeightClass = compact
       ? 'min-h-[52px] sm:min-h-[60px]'
+      : appliance === 'hood'
+      ? 'min-h-[60px] sm:min-h-[72px]'
+      : upper
+      ? 'min-h-[96px] sm:min-h-[120px]'
       : kind === 'drawer' && stackSize > 1
       ? 'min-h-[64px] sm:min-h-[80px]'
       : stackSize === 1
@@ -390,6 +460,8 @@ export const PhysicalFurnitureView: React.FC = () => {
 
     const frontClass = isMatch
       ? 'ring-4 ring-amber-400 bg-amber-50/95 border-2 border-amber-400 shadow-xl shadow-amber-300/50 z-10'
+      : appliance
+      ? 'bg-transparent hover:brightness-110'
       : kind === 'drawer'
       ? 'bg-gradient-to-b from-white via-slate-50 to-slate-100 border-2 border-slate-300 hover:border-blue-500 shadow-md'
       : kind === 'cabinet_door'
@@ -411,10 +483,15 @@ export const PhysicalFurnitureView: React.FC = () => {
         } ${isComposing ? 'outline-2 outline-dashed outline-blue-400 outline-offset-2' : ''}`}
         title={container.name}
         // Doors are taller than drawers when they share a column, like on real fronts
-        style={compact ? undefined : { flexGrow: kind === 'cabinet_door' ? 2 : kind === 'drawer' ? 1 : 1.5, flexBasis: 0 }}
+        style={compact ? undefined : { flexGrow: appliance === 'hood' ? 0.6 : kind === 'cabinet_door' || appliance ? 2 : kind === 'drawer' ? 1 : 1.5, flexBasis: 0 }}
       >
+        {appliance && !isMatch && <ApplianceFace kind={appliance} />}
+        {/* The cabinet under the sink gets a little water drop, so it's recognisable at a glance */}
+        {kind === 'cabinet_door' && isUnderSink(container.name) && (
+          <span className="absolute left-3 top-3 text-sky-500 text-sm pointer-events-none" aria-hidden="true">💧</span>
+        )}
         {/* Count / match pip */}
-        <div className="w-full flex items-center justify-end pointer-events-none">
+        <div className="relative w-full flex items-center justify-end pointer-events-none">
           {isMatch ? (
             <span className="min-w-[32px] h-7 px-2.5 rounded-full bg-amber-500 text-white font-black text-xs sm:text-sm shadow-md flex items-center justify-center gap-1 animate-pulse">
               ⚡ {matchCount}
@@ -446,7 +523,11 @@ export const PhysicalFurnitureView: React.FC = () => {
         </div>
 
         {/* Label: always visible, so you know what you are opening */}
-        <span className="w-full text-[11px] sm:text-xs font-bold text-slate-600 truncate pointer-events-none">
+        <span
+          className={`relative max-w-full text-[11px] sm:text-xs font-bold leading-tight line-clamp-2 break-words pointer-events-none ${
+            appliance === 'oven' || appliance === 'microwave' ? 'text-slate-100' : appliance ? 'px-1.5 rounded bg-white/80 text-slate-700' : 'w-full text-slate-600'
+          }`}
+        >
           {cleanContainerName(container.name)}
         </span>
 
@@ -483,9 +564,9 @@ export const PhysicalFurnitureView: React.FC = () => {
                 ? { left: false, right: false, up: sibIdx > 0, down: sibIdx >= 0 && sibIdx < siblings.length - 1 }
                 : {
                     left: !!editingPos && editingPos.col > 0,
-                    right: !!editingPos && editingPos.col < facadeNumColumns - 1,
+                    right: !!editingPos && editingPos.col < zones[editingPos.zone].num - 1,
                     up: !!editingPos && editingPos.row > 0,
-                    down: !!editingPos && editingPos.row < facadeColumns[editingPos.col].length - 1,
+                    down: !!editingPos && editingPos.row < zones[editingPos.zone].columns[editingPos.col].length - 1,
                   }
             }
             onRename={(name) => updateSlot(editingSlot.id, { name })}
@@ -495,8 +576,10 @@ export const PhysicalFurnitureView: React.FC = () => {
             onClose={() => setEditingSlotId(null)}
             doorCount={!inside && kind === 'cabinet_door' ? editingSlot.doorCount || 1 : undefined}
             onChangeDoorCount={(n) => updateSlot(editingSlot.id, { doorCount: n })}
-            columnWidth={!inside && editingPos ? columnWidth(editingPos.col) : undefined}
-            onChangeColumnWidth={(w) => editingPos && setColumnWidth(editingPos.col, w)}
+            columnWidth={!inside && editingPos ? columnWidth(editingPos.col, editingPos.zone) : undefined}
+            onChangeColumnWidth={(w) => editingPos && setColumnWidth(editingPos.col, w, editingPos.zone)}
+            zone={!inside && canHaveWallCabinets ? (editingSlot.zone === 'upper' ? 'upper' : 'base') : undefined}
+            onChangeZone={(z) => moveToZone(editingSlot, z)}
             onEditInside={
               !inside && kind === 'cabinet_door'
                 ? () => {
@@ -697,6 +780,19 @@ export const PhysicalFurnitureView: React.FC = () => {
 
             {/* Quick Drawer Selectors under Photo */}
             <div className="w-full flex flex-col gap-2.5">
+              {hasUpper && (
+                <div className="flex flex-wrap gap-2 justify-center">
+                  {[...upperZone.top, ...upperZone.columns.flat()].map((container) => (
+                    <button
+                      key={container.id}
+                      onClick={() => setSelectedContainerId(container.id)}
+                      className="px-3 min-h-[48px] rounded-2xl border-2 bg-white text-slate-800 border-slate-200 hover:border-blue-500 text-xs font-extrabold cursor-pointer"
+                    >
+                      {cleanContainerName(container.name)} · {containerTotal(container)}
+                    </button>
+                  ))}
+                </div>
+              )}
               <span className="text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-500 text-center">
                 Tap a drawer to open
               </span>
@@ -764,6 +860,95 @@ export const PhysicalFurnitureView: React.FC = () => {
             )}
             {/* Furniture shell: surfaces on top, then an open frame (tables, racks) or a closed cabinet */}
             <div className="w-full flex flex-col items-center">
+              {/* Wall cabinets above the countertop (kitchen runs): top of cabinets, cabinets, then the wall */}
+              {(hasUpper || (isComposing && canHaveWallCabinets)) && (
+                <div className="w-full flex flex-col items-center" data-zone="upper">
+                  {upperZone.top.length > 0 ? (
+                    <div className="w-[99%] flex gap-1.5 mb-1">
+                      {upperZone.top.map((container) => {
+                        const count = containerTotal(container);
+                        const isMatch = isSearching && matchingContainerIds.has(container.id);
+                        return (
+                          <button
+                            key={container.id}
+                            onClick={() => (isComposing ? setEditingSlotId(container.id) : setSelectedContainerId(container.id))}
+                            className={`flex-1 min-w-0 min-h-[40px] rounded-xl px-3 flex items-center justify-between gap-2 bg-white/70 border-2 border-dashed border-slate-300 text-slate-600 cursor-pointer hover:border-blue-400 ${
+                              isMatch ? 'ring-4 ring-amber-400' : ''
+                            } ${isSearching && !isMatch ? 'opacity-40' : ''}`}
+                            title={container.name}
+                          >
+                            <span className="text-xs font-bold truncate">{cleanContainerName(container.name)}</span>
+                            <span className={`min-w-[26px] h-6 px-2 rounded-full font-mono text-xs font-black flex items-center justify-center ${isMatch ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-700'}`}>
+                              {isMatch ? `⚡ ${matchCountsByContainer.get(container.id) || 0}` : count}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : isComposing && hasUpper ? (
+                    <button
+                      type="button"
+                      onClick={() => addSlot(0, 'top_surface', 'upper')}
+                      className="w-[99%] mb-1 min-h-[40px] rounded-xl border-2 border-dashed border-blue-300 bg-blue-50/60 hover:bg-blue-100 text-blue-700 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4 stroke-[2.5]" />
+                      <span>Add top of cabinets</span>
+                    </button>
+                  ) : null}
+
+                  {hasUpper ? (
+                    <div className="w-full grid gap-1.5 sm:gap-2.5" style={{ gridTemplateColumns: gridColumnsFor('upper') }}>
+                      {upperZone.columns.map((col, colIdx) => (
+                        <div key={colIdx} className="flex flex-col gap-1.5 sm:gap-2">
+                          {col.map((container) => renderFront(container, col.length, false, true))}
+                          {isComposing && addTile(colIdx, 'Add', 'upper')}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => addSlot(0, 'cabinet_door', 'upper')}
+                      className="w-full min-h-[64px] rounded-2xl border-2 border-dashed border-blue-300 bg-blue-50/60 hover:bg-blue-100 text-blue-700 text-sm font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4 stroke-[2.5]" />
+                      <span>Add wall cabinets above</span>
+                    </button>
+                  )}
+                  {isComposing && hasUpper && upperZone.num < maxColumns && (
+                    <div className="w-full mt-2">{addTile(upperZone.num, 'Add wall column', 'upper')}</div>
+                  )}
+
+                  {/* The wall between the wall cabinets and the countertop */}
+                  <div
+                    aria-hidden="true"
+                    className="w-[99%] h-9 sm:h-12 mt-1"
+                    style={{
+                      backgroundColor: '#e2e8f0',
+                      backgroundImage:
+                        'linear-gradient(90deg, rgba(148,163,184,.35) 1px, transparent 1px), linear-gradient(rgba(148,163,184,.35) 1px, transparent 1px)',
+                      backgroundSize: '30px 15px',
+                    }}
+                  />
+                </div>
+              )}
+
+              <div className="relative w-full flex flex-col items-center">
+              {/* Tap that marks the sink, standing on the countertop above the cabinet under the sink */}
+              {facadeColumns.map((col, colIdx) =>
+                col.some((c) => isUnderSink(c.name)) ? (
+                  <svg
+                    key={`tap-${colIdx}`}
+                    aria-hidden="true"
+                    viewBox="0 0 40 34"
+                    className="absolute bottom-full w-8 h-7 sm:w-10 sm:h-8 pointer-events-none"
+                    style={{ left: `calc(${(baseColumnSpan(colIdx).left + baseColumnSpan(colIdx).width / 2) * 99 + 0.5}% - 16px)` }}
+                  >
+                    <path d="M14 34 V12 Q14 3 23 3 Q32 3 32 12 V16" fill="none" stroke="#94a3b8" strokeWidth="4" strokeLinecap="round" />
+                    <rect x="8" y="30" width="14" height="4" rx="1.5" fill="#64748b" />
+                  </svg>
+                ) : null
+              )}
               {/* Top surfaces (tabletop, countertop) are drawn as the slab itself; otherwise a plain crown */}
               {facadeTop.length > 0 ? (
                 <div className="w-[99%] flex gap-1.5">
@@ -806,6 +991,8 @@ export const PhysicalFurnitureView: React.FC = () => {
                   className="w-[99%] h-5 sm:h-6 rounded-t-2xl shadow-sm border-t border-x border-white/40"
                 />
               )}
+
+              </div>
 
               {topLevelContainers.length === 0 && !isComposing ? (
                 <div className="w-full bg-white/85 rounded-b-3xl p-8 text-center flex flex-col items-center gap-3 border-4 border-t-0 border-slate-200">
@@ -870,7 +1057,7 @@ export const PhysicalFurnitureView: React.FC = () => {
                 </>
               )}
 
-              {isComposing && facadeColumns.length < 4 && (
+              {isComposing && facadeColumns.length < maxColumns && (
                 <div className="w-full mt-4">{addTile(facadeColumns.length, 'Add column')}</div>
               )}
 
