@@ -4,6 +4,7 @@ import { db } from '../db/database';
 import { Container, ContainerType } from '../types';
 import { API_BASE_URL, getWorkspaceApiKey, scheduleAutoSync } from '../services/apiSync';
 import { reportClientError } from '../services/errorReport';
+import { effectiveContainerType } from '../utils/containerKind';
 import { PhotoError } from './PhotoError';
 import { photoToJpegBase64 } from './ScanItemsModal';
 import { X, Camera, Sparkles, Loader2, Check } from 'lucide-react';
@@ -105,8 +106,72 @@ export const BuildLayoutModal: React.FC<{ furnitureId: string; onClose: () => vo
   const updateSection = (idx: number, patch: Partial<Section>) =>
     setLayout((l) => l && { ...l, sections: l.sections.map((s, i) => (i === idx ? { ...s, ...patch } : s)) });
 
+  // Kitchens (wall cabinets, appliances, countertop) are only refined: the photo fills in what's
+  // behind the existing doors, everything else stays. Replacing them lost the whole kitchen layout.
+  const keepsStructure = !!data?.containers.some(
+    (c) => !c.parentContainerId && (c.zone === 'upper' || effectiveContainerType(c) === 'appliance')
+  ) || data?.furniture?.type === 'kitchen_counter';
+
+  const applyInteriors = async () => {
+    if (!layout || !data) return;
+    const now = Date.now();
+    const base = data.containers.filter((c) => !c.parentContainerId && c.zone !== 'upper' && effectiveContainerType(c) !== 'top_surface');
+    const columns = Array.from(new Set(base.map((c) => c.columnIndex ?? 0))).sort((a, b) => a - b);
+    let filled = 0;
+    await db.transaction('rw', [db.containers, db.items], async () => {
+      for (let i = 0; i < layout.sections.length && i < columns.length; i++) {
+        const sec = layout.sections[i];
+        if (sec.door === 'none' || sec.parts.length === 0) continue;
+        // The door in the matching column (appliances such as the oven are left alone)
+        const door = base
+          .filter((c) => (c.columnIndex ?? 0) === columns[i] && effectiveContainerType(c) === 'cabinet_door')
+          .sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0))[0];
+        if (!door) continue;
+        const parts = sec.parts.map((p) => ({ type: PART_TO_CONTAINER[p.type], name: p.type === 'open' ? p.name || 'Open space' : p.name }));
+        // One open space behind a door adds nothing: the door itself already holds the items
+        if (parts.length === 1 && sec.parts[0].type === 'open') continue;
+        const old = data.containers.filter((c) => c.parentContainerId === door.id).map((c) => c.id);
+        if (old.length) {
+          await db.items.where('containerId').anyOf(old).modify({ containerId: door.id, updatedAt: now });
+          await db.containers.bulkDelete(old);
+        }
+        await db.containers.bulkAdd(
+          parts.map((p, row) => ({
+            id: `cont-${now}-${i}-${row}`,
+            furnitureId,
+            parentContainerId: door.id,
+            name: p.name,
+            type: p.type,
+            orderIndex: row,
+            createdAt: now,
+            updatedAt: now,
+          }))
+        );
+        await db.containers.update(door.id, { doorCount: sec.door === 'pair' ? 2 : 1, updatedAt: now });
+        filled++;
+      }
+    });
+    return filled;
+  };
+
   const apply = async () => {
     if (!layout || !data?.furniture) return;
+    if (keepsStructure) {
+      setApplying(true);
+      try {
+        const filled = await applyInteriors();
+        scheduleAutoSync();
+        if (!filled) window.alert('No doors matched what the photo shows, so nothing was changed. Use Edit layout to add shelves behind a door.');
+        onApplied?.();
+        onClose();
+      } catch (err) {
+        reportClientError('build-layout-interiors-failed', err, { furnitureId });
+        setError(`Could not apply the layout: ${(err as Error).message}`);
+      } finally {
+        setApplying(false);
+      }
+      return;
+    }
     const existingItems = data.itemCount;
     if (
       data.containers.length > 0 &&
@@ -288,7 +353,7 @@ export const BuildLayoutModal: React.FC<{ furnitureId: string; onClose: () => vo
               className="ml-auto px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-bold cursor-pointer flex items-center gap-1.5"
             >
               {applying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-              Use this layout
+              {keepsStructure ? "Fill in behind the doors" : "Use this layout"}
             </button>
           </div>
         )}
