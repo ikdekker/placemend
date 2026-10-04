@@ -59,6 +59,11 @@ export interface AppState {
   shareRoomId: string | null;
   setShareRoomId: (id: string | null) => void;
   setHistoryView: (view: { recordId: string | null; title?: string } | null) => void;
+  // Inbox of things a robot vacuum or camera spotted (api/sightings.php)
+  isSightingsOpen: boolean;
+  setSightingsOpen: (open: boolean) => void;
+  sightingsPending: number;
+  setSightingsPending: (count: number) => void;
 
   // Search
   searchQuery: string;
@@ -155,6 +160,10 @@ export const useAppStore = create<AppState>((set) => ({
   shareRoomId: null,
   setShareRoomId: (id) => set({ shareRoomId: id }),
   setHistoryView: (view) => set({ historyView: view }),
+  isSightingsOpen: false,
+  setSightingsOpen: (open) => set({ isSightingsOpen: open }),
+  sightingsPending: 0,
+  setSightingsPending: (count) => set({ sightingsPending: count }),
   searchQuery: '',
 
   setSelectedLocationId: (id) => set({ selectedLocationId: id }),

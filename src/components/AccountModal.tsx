@@ -23,7 +23,7 @@ import {
   isAutoSyncEnabled, 
   setAutoSyncEnabled 
 } from '../services/apiSync';
-import { History, 
+import { History, Inbox,
   X, 
   User, 
   LogOut, 
@@ -632,6 +632,30 @@ export const AccountModal: React.FC = () => {
                   </p>
                   <p className="text-[11px] text-slate-500 font-medium">
                     What changed, by whom (app, ChatGPT, Claude), with undo
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-slate-600 transition-transform group-hover:translate-x-0.5" />
+            </button>
+
+            {/* Spotted items (robot vacuum / camera sightings) */}
+            <button
+              onClick={() => {
+                setAccountModalOpen(false);
+                useAppStore.getState().setSightingsOpen(true);
+              }}
+              className="w-full p-3 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 transition-all flex items-center justify-between text-left cursor-pointer group shadow-xs"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+                  <Inbox className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-slate-800 group-hover:text-blue-600 transition-colors">
+                    Spotted items
+                  </p>
+                  <p className="text-[11px] text-slate-500 font-medium">
+                    What your robot vacuum or cameras saw, to add or match
                   </p>
                 </div>
               </div>

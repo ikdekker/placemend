@@ -13,6 +13,7 @@ import { AddWithPhotoModal } from './components/AddWithPhotoModal';
 import { SetupGuide } from './components/SetupGuide';
 import { AccountModal } from './components/AccountModal';
 import { HistoryModal } from './components/HistoryModal';
+import { SightingsModal } from './components/SightingsModal';
 import { Onboarding, DemoBanner } from './components/Onboarding';
 import { getAppMode, setAppMode as setDeviceMode, getOnboardingStep, setOnboardingStep } from './services/appMode';
 import { ShareRoomModal } from './components/ShareRoomModal';
@@ -43,6 +44,7 @@ export function App() {
       const s = useAppStore.getState();
       const dialogs: [boolean, () => void][] = [
         [!!s.historyView, () => s.setHistoryView(null)],
+        [s.isSightingsOpen, () => s.setSightingsOpen(false)],
         [!!s.shareRoomId, () => s.setShareRoomId(null)],
         [s.isItemModalOpen, () => s.setItemModalOpen(false)],
         [s.isConnectRoomModalOpen, () => s.setConnectRoomModalOpen(false)],
@@ -208,6 +210,7 @@ export function App() {
       <ConnectRoomModal />
       <MultiRoomOverviewModal />
       <HistoryModal />
+      <SightingsModal />
       <ShareRoomModal />
       <Onboarding ready={initDone} />
     </div>

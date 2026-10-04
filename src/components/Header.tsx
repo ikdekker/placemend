@@ -5,6 +5,8 @@ import { useAppStore } from '../store/useAppStore';
 import { getShareMeta } from '../services/sharing';
 import { useVisualSearch } from '../hooks/useVisualSearch';
 import { scheduleSeedIfEmpty } from '../db/sampleData';
+import { getWorkspaceApiKey } from '../services/apiSync';
+import { fetchSightings } from '../services/sightings';
 import { 
   Search, 
   MapPin, 
@@ -14,7 +16,8 @@ import {
   Zap,
   SlidersHorizontal,
   User,
-  LayoutGrid
+  LayoutGrid,
+  Inbox
 } from 'lucide-react';
 
 export const Header: React.FC = () => {
@@ -34,6 +37,9 @@ export const Header: React.FC = () => {
     currentUser,
     setAccountModalOpen,
     setSelectedFurnitureId,
+    sightingsPending,
+    setSightingsPending,
+    setSightingsOpen,
   } = useAppStore();
 
   const { isSearching, totalMatches } = useVisualSearch();
@@ -68,6 +74,23 @@ export const Header: React.FC = () => {
       }
     }
   }, [rooms, selectedRoomId, setSelectedRoomId]);
+
+  // Items a robot vacuum or camera spotted: show a badge while some wait for review
+  useEffect(() => {
+    const check = () => {
+      if (document.visibilityState !== 'visible' || !getWorkspaceApiKey().startsWith('pm_usr_')) return;
+      fetchSightings()
+        .then((r) => setSightingsPending(r.pendingCount))
+        .catch(() => {});
+    };
+    check();
+    const t = setInterval(check, 5 * 60000);
+    window.addEventListener('focus', check);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener('focus', check);
+    };
+  }, [currentUser, setSightingsPending]);
 
   // Focus search input when search is opened
   useEffect(() => {
@@ -222,6 +245,19 @@ export const Header: React.FC = () => {
 
         {/* Canvas controls (add, room shape, dimensions, recenter, fullscreen) live in the canvas toolbar;
             backup & tools live in the account menu. */}
+
+        {sightingsPending > 0 && (
+          <button
+            onClick={() => setSightingsOpen(true)}
+            className="relative flex items-center justify-center min-h-[44px] min-w-[44px] rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition-all cursor-pointer active:scale-95"
+            title={`${sightingsPending} spotted ${sightingsPending === 1 ? 'item' : 'items'} to review`}
+          >
+            <Inbox className="w-4.5 h-4.5" />
+            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-600 text-white text-[10px] font-black flex items-center justify-center">
+              {sightingsPending > 99 ? '99+' : sightingsPending}
+            </span>
+          </button>
+        )}
 
         {/* User Account / Sign In Button (Far Top Right) */}
         <button
