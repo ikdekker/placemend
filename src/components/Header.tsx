@@ -20,6 +20,10 @@ import {
   Inbox
 } from 'lucide-react';
 
+// Search shortcut label: ⌘K on Apple devices, Ctrl K elsewhere (the handler accepts both)
+const IS_APPLE = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent);
+const SEARCH_HOTKEY = IS_APPLE ? '⌘K' : 'Ctrl K';
+
 export const Header: React.FC = () => {
   const {
     appMode,
@@ -196,7 +200,7 @@ export const Header: React.FC = () => {
             </>
           ) : (
             <div className="flex items-center gap-0.5 font-mono text-[10px] text-slate-400 bg-slate-200/70 px-1.5 py-0.5 rounded border border-slate-300/60 font-semibold pointer-events-none">
-              <span>⌘K</span>
+              <span>{SEARCH_HOTKEY}</span>
             </div>
           )}
         </div>
