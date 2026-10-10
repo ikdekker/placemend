@@ -114,6 +114,24 @@ function storeRoomId(id: string | null): void {
   }
 }
 
+const LABELS_KEY = 'placemend_show_labels';
+const DIMENSIONS_KEY = 'placemend_show_dimensions';
+function readStoredFlag(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key);
+    return v === null ? fallback : v === '1';
+  } catch {
+    return fallback;
+  }
+}
+function storeFlag(key: string, value: boolean): void {
+  try {
+    localStorage.setItem(key, value ? '1' : '0');
+  } catch {
+    // storage unavailable: the choice just isn't remembered
+  }
+}
+
 export const useAppStore = create<AppState>((set) => ({
   appMode: 'view', // default clean view/search mode
   setAppMode: (mode) => set({ appMode: mode }),
@@ -133,8 +151,8 @@ export const useAppStore = create<AppState>((set) => ({
   panOffset: typeof window !== 'undefined' && window.innerWidth < 768 ? { x: 12, y: 180 } : { x: 80, y: 80 },
   fitViewTrigger: 0,
   gridSnap: true,
-  showLabels: true,
-  showDimensions: false,
+  showLabels: readStoredFlag(LABELS_KEY, true),
+  showDimensions: readStoredFlag(DIMENSIONS_KEY, false),
   isRoomShapeModalOpen: false,
   roomShapeModalTab: 'presets',
 
@@ -193,8 +211,16 @@ export const useAppStore = create<AppState>((set) => ({
   resetView: () => set((s) => ({ fitViewTrigger: s.fitViewTrigger + 1 })),
 
   toggleGridSnap: () => set((s) => ({ gridSnap: !s.gridSnap })),
-  toggleShowLabels: () => set((s) => ({ showLabels: !s.showLabels })),
-  toggleShowDimensions: () => set((s) => ({ showDimensions: !s.showDimensions })),
+  toggleShowLabels: () =>
+    set((s) => {
+      storeFlag(LABELS_KEY, !s.showLabels);
+      return { showLabels: !s.showLabels };
+    }),
+  toggleShowDimensions: () =>
+    set((s) => {
+      storeFlag(DIMENSIONS_KEY, !s.showDimensions);
+      return { showDimensions: !s.showDimensions };
+    }),
 
   setSearchOpen: (open) => set({ isSearchOpen: open }),
   setItemModalOpen: (open, itemId = null) => set({ isItemModalOpen: open, editingItemId: itemId }),
